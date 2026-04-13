@@ -230,9 +230,10 @@ def process_overdue(config, my, sq):
             context_msg = "⚠ 此任务已逾期，请立即处理。请在任务详情中说明原因并更新预计完成时间。"
             btn_text = "立即处理"
         else:
-            subject = f"[即将逾期] {t['task_name'][:15]} {remaining}"
+            hours_left = int((end_at - now).total_seconds() / 3600)
+            subject = f"[即将逾期] {t['task_name'][:15]} 还剩{hours_left}小时"
             color_bar = "#FF9800"
-            context_msg = f"⚠ 此任务将在 {remaining} 后到期，请及时完成。"
+            context_msg = f"⚠ 此任务将在 {hours_left} 小时后到期，请及时完成。"
             btn_text = "查看任务"
 
         html = tpl.safe_substitute(
