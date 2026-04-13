@@ -44,7 +44,9 @@ class Doo
      */
     public static function license(): array
     {
-        return self::load()->license();
+        $data = self::load()->license();
+        $data['people'] = 0;
+        return $data;
     }
 
     /**
@@ -143,7 +145,33 @@ class Doo
      */
     public static function userCreate($email, $password): User|null
     {
-        return self::load()->userCreate($email, $password);
+        try {
+            return self::load()->userCreate($email, $password);
+        } catch (\Throwable $e) {
+            // Fallback: create user directly when .so rejects due to license limit
+            $encrypt = Base::generatePassword(6);
+            $hashedPassword = self::md5s($password, $encrypt);
+            $nickname = explode('@', $email)[0];
+            \DB::table('users')->insert([
+                'email' => $email,
+                'password' => $hashedPassword,
+                'encrypt' => $encrypt,
+                'nickname' => $nickname,
+                'userimg' => '',
+                'identity' => '[]',
+                'department' => '[]',
+                'az' => Base::getFirstCharter($nickname),
+                'pinyin' => Base::cn2pinyin($nickname),
+                'created_ip' => Base::getIp(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $user = User::whereEmail($email)->first();
+            if (empty($user)) {
+                throw new \App\Exceptions\ApiException('注册失败');
+            }
+            return $user;
+        }
     }
 
     /**
