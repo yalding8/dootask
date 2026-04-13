@@ -268,6 +268,220 @@ def process_overdue(config, my, sq):
 
 
 # ---------------------------------------------------------------------------
+# New task assigned notifications (Issue #3)
+# ---------------------------------------------------------------------------
+
+def query_new_tasks(my, prefix):
+    """Get tasks created in the last 7 days with assignees"""
+    since = datetime.now() - timedelta(days=7)
+    sql = f"""
+        SELECT
+            t.id            AS task_id,
+            t.name          AS task_name,
+            t.`desc`        AS task_desc,
+            t.end_at,
+            t.created_at,
+            t.p_name        AS priority_name,
+            t.p_color       AS priority_color,
+            t.flow_item_name AS status_name,
+            t.project_id,
+            t.userid        AS creator_id,
+            creator.nickname AS assigner_name,
+            owner.userid     AS owner_id,
+            owner.nickname   AS owner_name,
+            owner.email      AS owner_email,
+            p.name           AS project_name
+        FROM {prefix}project_tasks t
+        JOIN {prefix}project_task_users tu
+            ON tu.task_id = t.id AND tu.owner = 1
+        JOIN {prefix}users owner
+            ON tu.userid = owner.userid
+        JOIN {prefix}users creator
+            ON t.userid = creator.userid
+        JOIN {prefix}projects p
+            ON t.project_id = p.id
+        WHERE t.complete_at IS NULL
+          AND t.deleted_at IS NULL
+          AND t.archived_at IS NULL
+          AND t.created_at >= %s
+          AND t.userid != tu.userid
+          AND owner.disable_at IS NULL
+          AND owner.bot = 0
+        ORDER BY t.created_at DESC
+    """
+    with my.cursor() as cur:
+        cur.execute(sql, (since,))
+        return cur.fetchall()
+
+
+def process_assigned(config, my, sq):
+    prefix = config.get("database", "prefix", fallback="pre_")
+    base_url = config.get("notify", "base_url")
+
+    tpl = load_template("overdue")  # Reuse same template structure
+    if not tpl:
+        return
+
+    tasks = query_new_tasks(my, prefix)
+
+    for t in tasks:
+        if already_sent(sq, t["task_id"], t["owner_id"], "assigned"):
+            continue
+
+        end_at = ensure_datetime(t["end_at"]) if t["end_at"] else None
+        if end_at:
+            deadline_str = end_at.strftime("%Y-%m-%d %H:%M")
+            remaining = fmt_remaining(end_at)
+        else:
+            deadline_str = "未设置"
+            remaining = "无截止时间"
+
+        task_url = f"{base_url}/single/task/{t['task_id']}"
+        desc_preview = (t["task_desc"] or "")[:200]
+        context_msg = f"{desc_preview}" if desc_preview else "请查看任务详情，确认接收并回复预计完成时间。"
+
+        subject = f"[任务] {t['assigner_name']}给你: {t['task_name'][:15]}"
+
+        html = tpl.safe_substitute(
+            color_bar="#4CAF50",
+            task_name=t["task_name"],
+            assigner_name=t["assigner_name"],
+            owner_name=t["owner_name"],
+            deadline=deadline_str,
+            time_remaining=remaining,
+            priority_name=t["priority_name"] or "普通",
+            priority_color=t["priority_color"] or "#999",
+            status_name=next((s for s in (t["status_name"] or "").split("|")[1:] if s), "进行中"),
+            project_name=t["project_name"],
+            context_msg=context_msg,
+            btn_text="查看任务详情",
+            task_url=task_url,
+            base_url=base_url,
+        )
+
+        try:
+            send_email(config, t["owner_email"], subject, html)
+            mark_sent(sq, t["task_id"], t["owner_id"], "assigned")
+            log.info(
+                f"Sent assigned → {t['owner_email']} "
+                f"task#{t['task_id']}: {t['task_name']}"
+            )
+        except Exception as e:
+            log.error(
+                f"Failed assigned → {t['owner_email']} "
+                f"task#{t['task_id']}: {e}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Confirm timeout notifications (Issue #3)
+# ---------------------------------------------------------------------------
+
+def query_unconfirmed_tasks(my, prefix, timeout_hours):
+    """Get tasks not confirmed after timeout_hours"""
+    cutoff = datetime.now() - timedelta(hours=timeout_hours)
+    sql = f"""
+        SELECT
+            t.id            AS task_id,
+            t.name          AS task_name,
+            t.end_at,
+            t.created_at,
+            t.p_name        AS priority_name,
+            t.p_color       AS priority_color,
+            t.flow_item_name AS status_name,
+            t.project_id,
+            creator.nickname AS assigner_name,
+            owner.userid     AS owner_id,
+            owner.nickname   AS owner_name,
+            owner.email      AS owner_email,
+            p.name           AS project_name
+        FROM {prefix}project_tasks t
+        JOIN {prefix}project_task_users tu
+            ON tu.task_id = t.id AND tu.owner = 1
+        JOIN {prefix}users owner
+            ON tu.userid = owner.userid
+        JOIN {prefix}users creator
+            ON t.userid = creator.userid
+        JOIN {prefix}projects p
+            ON t.project_id = p.id
+        WHERE t.complete_at IS NULL
+          AND t.deleted_at IS NULL
+          AND t.archived_at IS NULL
+          AND t.created_at <= %s
+          AND t.flow_item_name LIKE 'start|%%'
+          AND t.userid != tu.userid
+          AND owner.disable_at IS NULL
+          AND owner.bot = 0
+        ORDER BY t.created_at ASC
+    """
+    with my.cursor() as cur:
+        cur.execute(sql, (cutoff,))
+        return cur.fetchall()
+
+
+def process_confirm_timeout(config, my, sq):
+    prefix = config.get("database", "prefix", fallback="pre_")
+    timeout_hours = config.getint("notify", "confirm_timeout_hours", fallback=4)
+    base_url = config.get("notify", "base_url")
+
+    tpl = load_template("overdue")  # Reuse same template structure
+    if not tpl:
+        return
+
+    tasks = query_unconfirmed_tasks(my, prefix, timeout_hours)
+    now = datetime.now()
+
+    for t in tasks:
+        if already_sent(sq, t["task_id"], t["owner_id"], "confirm_timeout"):
+            continue
+
+        created_at = ensure_datetime(t["created_at"])
+        wait_hours = int((now - created_at).total_seconds() / 3600)
+
+        end_at = ensure_datetime(t["end_at"]) if t["end_at"] else None
+        if end_at:
+            deadline_str = end_at.strftime("%Y-%m-%d %H:%M")
+            remaining = fmt_remaining(end_at)
+        else:
+            deadline_str = "未设置"
+            remaining = "无截止时间"
+
+        task_url = f"{base_url}/single/task/{t['task_id']}"
+        subject = f"[待确认] {t['task_name'][:15]} (等待{wait_hours}小时)"
+        context_msg = "请在任务详情中确认接收，并回复预计完成时间。"
+
+        html = tpl.safe_substitute(
+            color_bar="#FF9800",
+            task_name=t["task_name"],
+            assigner_name=t["assigner_name"],
+            owner_name=t["owner_name"],
+            deadline=deadline_str,
+            time_remaining=remaining,
+            priority_name=t["priority_name"] or "普通",
+            priority_color=t["priority_color"] or "#999",
+            status_name=next((s for s in (t["status_name"] or "").split("|")[1:] if s), "待处理"),
+            project_name=t["project_name"],
+            context_msg=context_msg,
+            btn_text="确认任务",
+            task_url=task_url,
+            base_url=base_url,
+        )
+
+        try:
+            send_email(config, t["owner_email"], subject, html)
+            mark_sent(sq, t["task_id"], t["owner_id"], "confirm_timeout")
+            log.info(
+                f"Sent confirm_timeout → {t['owner_email']} "
+                f"task#{t['task_id']}: {t['task_name']} (waited {wait_hours}h)"
+            )
+        except Exception as e:
+            log.error(
+                f"Failed confirm_timeout → {t['owner_email']} "
+                f"task#{t['task_id']}: {e}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -286,6 +500,8 @@ def main():
         return
 
     try:
+        process_assigned(config, my, sq)
+        process_confirm_timeout(config, my, sq)
         process_overdue(config, my, sq)
     except Exception as e:
         log.error(f"Error in notification processing: {e}")
