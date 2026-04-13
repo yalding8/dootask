@@ -4,7 +4,7 @@ This is a modified version of [DooTask](https://github.com/kuaifan/dootask), lic
 
 ## Modified by
 
-- **Organization**: 天津异乡好居股份有限公司 (Uhomes)
+- **Organization**: dingning.ai
 - **Contact**: ceo@dingning.ai
 - **Date**: 2026-04-13
 
