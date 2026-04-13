@@ -245,7 +245,7 @@ def process_overdue(config, my, sq):
             time_remaining=remaining,
             priority_name=t["priority_name"] or "普通",
             priority_color=t["priority_color"] or "#999",
-            status_name=(t["status_name"] or "进行中").split("|")[-1],
+            status_name=next((s for s in (t["status_name"] or "").split("|")[1:] if s), "进行中"),
             project_name=t["project_name"],
             context_msg=context_msg,
             btn_text=btn_text,
