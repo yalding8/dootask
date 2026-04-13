@@ -9,6 +9,43 @@
 
 - QQ群号: `546574618`
 
+## Fork 修改说明 (dingning.ai)
+
+本仓库是 [DooTask](https://github.com/kuaifan/dootask) 的修改版 Fork，用于内部部署。详见 [MODIFICATIONS.md](./MODIFICATIONS.md)。
+
+### DooTask 代码修改
+
+- `app/Module/Doo.php`：绕过 License 用户数限制（自建部署）
+- `docker/nginx/default.conf`：禁用 appstore 代理（镜像不可用）
+
+### 任务邮件通知系统
+
+独立 Python 脚本（`task-notify/`），只读 DooTask 数据库，在任务关键节点自动发送结构化邮件：
+
+| 通知类型 | 触发条件 | 颜色 |
+|---------|---------|------|
+| 新任务指派 | 任务创建并分配负责人 | 绿色 |
+| 确认超时 | 创建 4 小时后仍未确认 | 橙色 |
+| 逾期警告 | 截止前 4 小时 / 已逾期 | 红色 |
+| 每日汇总 | 每天 16:00 | 蓝色 |
+
+配置方式：参考 `task-notify/config.ini.example`。
+
+```bash
+# 安装依赖
+pip3 install pymysql
+cp task-notify/config.ini.example task-notify/config.ini
+# 编辑 config.ini 填入数据库和 SMTP 凭证
+
+# 手动运行
+python3 task-notify/notify.py
+
+# 添加定时任务（每分钟执行）
+echo '* * * * * root /opt/task-notify/venv/bin/python3 /opt/task-notify/notify.py' > /etc/cron.d/task-notify
+```
+
+---
+
 ## 📍 0.x 迁移到 1.x
 
 - 升级时请务必备份好数据！

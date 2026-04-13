@@ -9,6 +9,43 @@ English | **[中文文档](./README_CN.md)**
 
 - Group Number: `546574618`
 
+## Fork Modifications (dingning.ai)
+
+This is a modified fork of [DooTask](https://github.com/kuaifan/dootask) for internal use. See [MODIFICATIONS.md](./MODIFICATIONS.md) for details.
+
+### Changes to DooTask
+
+- `app/Module/Doo.php`: Bypass license user limit for self-hosted deployment
+- `docker/nginx/default.conf`: Disabled appstore proxy (image unavailable)
+
+### Task Email Notification System
+
+An independent Python script (`task-notify/`) that reads DooTask database (read-only) and sends structured email notifications:
+
+| Notification | Trigger | Color |
+|-------------|---------|-------|
+| New task assigned | Task created with assignee | Green |
+| Confirm timeout | Not confirmed after 4h | Orange |
+| Overdue warning | 4h before deadline / overdue | Red |
+| Daily summary | Every day at 16:00 | Blue |
+
+Setup: see `task-notify/config.ini.example` for configuration.
+
+```bash
+# Install
+pip3 install pymysql
+cp task-notify/config.ini.example task-notify/config.ini
+# Edit config.ini with your DB and SMTP credentials
+
+# Run manually
+python3 task-notify/notify.py
+
+# Add to cron (every minute)
+echo '* * * * * root /opt/task-notify/venv/bin/python3 /opt/task-notify/notify.py' > /etc/cron.d/task-notify
+```
+
+---
+
 ## 📍 Migration from 0.x to 1.x
 
 - Please ensure to back up your data before upgrading!
