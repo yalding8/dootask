@@ -14,9 +14,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from string import Template
 
+import fcntl
+
 import pymysql
 
 BASE_DIR = Path(__file__).parent
+LOCK_FILE = BASE_DIR / ".notify.lock"
 LOG_FILE = BASE_DIR / "notify.log"
 DB_FILE = BASE_DIR / "task_email_logs.db"
 TEMPLATE_DIR = BASE_DIR / "templates"
@@ -54,7 +57,8 @@ def get_mysql(config):
 
 
 def init_sqlite():
-    conn = sqlite3.connect(str(DB_FILE))
+    conn = sqlite3.connect(str(DB_FILE), timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS task_email_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,6 +197,7 @@ def query_overdue_tasks(my, prefix, warning_hours):
           AND t.end_at <= %s
           AND owner.disable_at IS NULL
           AND owner.bot = 0
+        GROUP BY t.id, owner.userid
         ORDER BY t.end_at ASC
     """
     with my.cursor() as cur:
@@ -307,6 +312,7 @@ def query_new_tasks(my, prefix):
           AND t.userid != tu.userid
           AND owner.disable_at IS NULL
           AND owner.bot = 0
+        GROUP BY t.id, owner.userid
         ORDER BY t.created_at DESC
     """
     with my.cursor() as cur:
@@ -412,6 +418,7 @@ def query_unconfirmed_tasks(my, prefix, timeout_hours):
           AND t.userid != tu.userid
           AND owner.disable_at IS NULL
           AND owner.bot = 0
+        GROUP BY t.id, owner.userid
         ORDER BY t.created_at ASC
     """
     with my.cursor() as cur:
@@ -486,9 +493,17 @@ def process_confirm_timeout(config, my, sq):
 # ---------------------------------------------------------------------------
 
 def main():
+    # File lock to prevent concurrent execution
+    lock_fp = open(str(LOCK_FILE), "w")
+    try:
+        fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return  # Another instance is running
+
     config = load_config()
 
     if not in_time_range(config):
+        lock_fp.close()
         return
 
     sq = init_sqlite()
@@ -508,6 +523,7 @@ def main():
     finally:
         my.close()
         sq.close()
+        lock_fp.close()
 
 
 if __name__ == "__main__":
