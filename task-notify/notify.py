@@ -590,7 +590,7 @@ def build_task_group_html(label, color, tasks, base_url):
             time_style = "color:#999;"
         task_url = f"{base_url}/single/task/{t['task_id']}"
         html += f'<p style="font-size:13px;color:#333;margin:2px 0;line-height:1.6;">'
-        html += f'&nbsp;&nbsp;├─ <a href="{task_url}" style="color:#333;text-decoration:none;">{t["task_name"][:30]}</a>'
+        html += f'&nbsp;&nbsp;├─ <a href="{task_url}" style="color:#333;text-decoration:none;">{t["task_name"][:30]}{"…" if len(t["task_name"]) > 30 else ""}</a>'
         html += f' &nbsp;<span style="{time_style}font-size:12px;">{time_info}</span>'
         html += f'</p>'
     html += '</div>'
