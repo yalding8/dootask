@@ -489,6 +489,213 @@ def process_confirm_timeout(config, my, sq):
 
 
 # ---------------------------------------------------------------------------
+# Daily summary notifications (Issue #4)
+# ---------------------------------------------------------------------------
+
+def query_all_pending_tasks(my, prefix):
+    """Get all incomplete tasks grouped by owner"""
+    sql = f"""
+        SELECT
+            t.id            AS task_id,
+            t.name          AS task_name,
+            t.end_at,
+            t.p_name        AS priority_name,
+            t.project_id,
+            owner.userid     AS owner_id,
+            owner.nickname   AS owner_name,
+            owner.email      AS owner_email,
+            p.name           AS project_name
+        FROM {prefix}project_tasks t
+        JOIN {prefix}project_task_users tu
+            ON tu.task_id = t.id AND tu.owner = 1
+        JOIN {prefix}users owner
+            ON tu.userid = owner.userid
+        JOIN {prefix}projects p
+            ON t.project_id = p.id
+        WHERE t.complete_at IS NULL
+          AND t.deleted_at IS NULL
+          AND t.archived_at IS NULL
+          AND owner.disable_at IS NULL
+          AND owner.bot = 0
+        GROUP BY t.id, owner.userid
+        ORDER BY t.end_at ASC
+    """
+    with my.cursor() as cur:
+        cur.execute(sql)
+        return cur.fetchall()
+
+
+def query_team_stats(my, prefix):
+    """Get team completion stats for the current week"""
+    # Monday of current week
+    today = datetime.now().date()
+    monday = today - timedelta(days=today.weekday())
+    sql = f"""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN t.complete_at IS NOT NULL THEN 1 ELSE 0 END) AS done
+        FROM {prefix}project_tasks t
+        WHERE t.deleted_at IS NULL
+          AND t.archived_at IS NULL
+          AND t.created_at >= %s
+    """
+    with my.cursor() as cur:
+        cur.execute(sql, (monday,))
+        row = cur.fetchone()
+        return row["total"] or 0, row["done"] or 0
+
+
+def query_user_stats(my, prefix, user_id):
+    """Get individual completion stats for the current week"""
+    today = datetime.now().date()
+    monday = today - timedelta(days=today.weekday())
+    sql = f"""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN t.complete_at IS NOT NULL THEN 1 ELSE 0 END) AS done
+        FROM {prefix}project_tasks t
+        JOIN {prefix}project_task_users tu
+            ON tu.task_id = t.id AND tu.owner = 1
+        WHERE t.deleted_at IS NULL
+          AND t.archived_at IS NULL
+          AND t.created_at >= %s
+          AND tu.userid = %s
+    """
+    with my.cursor() as cur:
+        cur.execute(sql, (monday, user_id))
+        row = cur.fetchone()
+        return row["total"] or 0, row["done"] or 0
+
+
+def build_task_group_html(label, color, tasks, base_url):
+    """Build HTML for a task group (overdue/today/ongoing)"""
+    if not tasks:
+        return ""
+    now = datetime.now()
+    html = f'<div style="margin-bottom:16px;">'
+    html += f'<p style="font-size:14px;font-weight:bold;color:{color};margin:0 0 8px;">'
+    html += f'{label} ({len(tasks)}项)</p>'
+    for t in tasks:
+        end_at = ensure_datetime(t["end_at"]) if t["end_at"] else None
+        if end_at:
+            if end_at < now:
+                days = int((now - end_at).total_seconds() / 86400)
+                time_info = f"逾期{days}天" if days > 0 else "逾期"
+                time_style = f"color:{color};font-weight:bold;"
+            else:
+                time_info = end_at.strftime("%m/%d %H:%M")
+                time_style = "color:#666;"
+        else:
+            time_info = "无截止"
+            time_style = "color:#999;"
+        task_url = f"{base_url}/single/task/{t['task_id']}"
+        html += f'<p style="font-size:13px;color:#333;margin:2px 0;line-height:1.6;">'
+        html += f'&nbsp;&nbsp;├─ <a href="{task_url}" style="color:#333;text-decoration:none;">{t["task_name"][:30]}</a>'
+        html += f' &nbsp;<span style="{time_style}font-size:12px;">{time_info}</span>'
+        html += f'</p>'
+    html += '</div>'
+    return html
+
+
+def process_daily_summary(config, my, sq):
+    """Send daily summary at configured hour"""
+    summary_hour = config.getint("notify", "daily_summary_hour", fallback=16)
+    now = datetime.now()
+
+    # Only run at the configured hour
+    if now.hour != summary_hour:
+        return
+
+    prefix = config.get("database", "prefix", fallback="pre_")
+    base_url = config.get("notify", "base_url")
+
+    tpl = load_template("daily")
+    if not tpl:
+        return
+
+    # Get all pending tasks and group by owner
+    all_tasks = query_all_pending_tasks(my, prefix)
+    team_total, team_done = query_team_stats(my, prefix)
+    team_rate = int(team_done / team_total * 100) if team_total > 0 else 0
+
+    # Group tasks by owner_id
+    by_owner = {}
+    for t in all_tasks:
+        oid = t["owner_id"]
+        if oid not in by_owner:
+            by_owner[oid] = {
+                "name": t["owner_name"],
+                "email": t["owner_email"],
+                "tasks": [],
+            }
+        by_owner[oid]["tasks"].append(t)
+
+    today_str = now.strftime("%Y%m%d")
+
+    for owner_id, data in by_owner.items():
+        notify_type = f"daily_{today_str}"
+        if already_sent(sq, 0, owner_id, notify_type):
+            continue
+
+        tasks = data["tasks"]
+        if not tasks:
+            continue
+
+        # Classify tasks
+        overdue = []
+        due_today = []
+        ongoing = []
+        for t in tasks:
+            end_at = ensure_datetime(t["end_at"]) if t["end_at"] else None
+            if end_at is None:
+                ongoing.append(t)
+            elif end_at < now:
+                overdue.append(t)
+            elif end_at.date() == now.date():
+                due_today.append(t)
+            else:
+                ongoing.append(t)
+
+        # Build task groups HTML
+        groups_html = build_task_group_html(
+            "&#128308; 已逾期", "#F44336", overdue, base_url)
+        groups_html += build_task_group_html(
+            "&#128992; 今日到期", "#FF9800", due_today, base_url)
+        groups_html += build_task_group_html(
+            "&#128994; 进行中", "#4CAF50", ongoing, base_url)
+
+        # User stats
+        user_total, user_done = query_user_stats(my, prefix, owner_id)
+        user_rate = int(user_done / user_total * 100) if user_total > 0 else 0
+
+        team_stats_html = (
+            f"&#128202; 团队本周: 已完成 {team_done}/{team_total} "
+            f"({team_rate}%)<br>"
+            f"&nbsp;&nbsp;&nbsp;&nbsp;你的完成率: {user_rate}%"
+        )
+
+        subject = f"[日报] {len(tasks)}项待办 · 团队完成率{team_rate}%"
+
+        html = tpl.safe_substitute(
+            greeting=f"{data['name']}，今天还有 {len(tasks)} 项任务需要关注：",
+            task_groups=groups_html,
+            team_stats=team_stats_html,
+            base_url=base_url,
+        )
+
+        try:
+            send_email(config, data["email"], subject, html)
+            mark_sent(sq, 0, owner_id, notify_type)
+            log.info(
+                f"Sent daily_summary → {data['email']} "
+                f"({len(overdue)} overdue, {len(due_today)} today, "
+                f"{len(ongoing)} ongoing)"
+            )
+        except Exception as e:
+            log.error(f"Failed daily_summary → {data['email']}: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -518,6 +725,7 @@ def main():
         process_assigned(config, my, sq)
         process_confirm_timeout(config, my, sq)
         process_overdue(config, my, sq)
+        process_daily_summary(config, my, sq)
     except Exception as e:
         log.error(f"Error in notification processing: {e}")
     finally:
