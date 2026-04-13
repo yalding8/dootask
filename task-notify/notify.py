@@ -722,12 +722,12 @@ def main():
         return
 
     try:
-        process_assigned(config, my, sq)
-        process_confirm_timeout(config, my, sq)
-        process_overdue(config, my, sq)
-        process_daily_summary(config, my, sq)
-    except Exception as e:
-        log.error(f"Error in notification processing: {e}")
+        for proc in [process_assigned, process_confirm_timeout,
+                     process_overdue, process_daily_summary]:
+            try:
+                proc(config, my, sq)
+            except Exception as e:
+                log.error(f"Error in {proc.__name__}: {e}")
     finally:
         my.close()
         sq.close()
