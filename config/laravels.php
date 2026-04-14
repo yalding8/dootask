@@ -197,7 +197,9 @@ return [
         // The list of cron job
         'jobs'            => [
             // Enable LaravelScheduleJob to run `php artisan schedule:run` every 1 minute, replace Linux Crontab
-            // Hhxsv5\LaravelS\Illuminate\LaravelScheduleJob::class,
+            // 启用后，app/Console/Kernel.php::schedule() 中注册的定时任务才会被触发。
+            // 注意：依赖 LARAVELS_TIMER=true，请在部署 .env 中开启。
+            Hhxsv5\LaravelS\Illuminate\LaravelScheduleJob::class,
         ],
 
         // Max waiting time of reloading
