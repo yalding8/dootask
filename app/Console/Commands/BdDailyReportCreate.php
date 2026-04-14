@@ -79,16 +79,30 @@ class BdDailyReportCreate extends Command
             return 1;
         }
 
-        // 5. 查 BD 部门成员（全量，含韦刚本人也有一条子任务）
+        // 5. 查 BD 部门成员（根部门 + 所有递归子部门，全量含管理成员）
         $deptName = (string) config('bd_daily_report.department_name');
         $dept = UserDepartment::where('name', $deptName)->first();
         if (!$dept) {
             BdDailyReportNotifier::alert("部门 '{$deptName}' 不存在，可能已改名", $parentOwner->userid);
             return 1;
         }
-        // users.department 字段为 ",id1,id2," 格式
-        $bdUsers = User::where('department', 'like', "%,{$dept->id},%")
-            ->whereNull('disable_at')
+        // 递归收集子部门 id
+        $deptIds = [(int) $dept->id];
+        $frontier = [(int) $dept->id];
+        while (!empty($frontier)) {
+            $children = UserDepartment::whereIn('parent_id', $frontier)->pluck('id')->toArray();
+            $newIds = array_values(array_diff($children, $deptIds));
+            if (empty($newIds)) break;
+            $deptIds = array_merge($deptIds, $newIds);
+            $frontier = $newIds;
+        }
+        // users.department 字段为 ",id1,id2," 格式，逐个 id 做 LIKE OR
+        $bdUsers = User::whereNull('disable_at')
+            ->where(function ($q) use ($deptIds) {
+                foreach ($deptIds as $did) {
+                    $q->orWhere('department', 'like', "%,{$did},%");
+                }
+            })
             ->orderBy('userid')
             ->get();
         if ($bdUsers->isEmpty()) {

@@ -10,8 +10,9 @@ return [
     // 项目名（DooTask 里必须已存在同名项目）
     'project_name' => env('BD_REPORT_PROJECT', '留学渠道全员任务'),
 
-    // 部门名（DooTask 里 user_departments.name）
-    'department_name' => env('BD_REPORT_DEPARTMENT', '留学渠道部'),
+    // 根部门名（DooTask 里 user_departments.name）
+    // 命令会递归包含该部门所有子部门的成员
+    'department_name' => env('BD_REPORT_DEPARTMENT', '异乡好居留学渠道部'),
 
     // 父任务负责人邮箱（韦刚），启动时按 email 解析 userid
     'parent_owner_email' => env('BD_REPORT_PARENT_OWNER_EMAIL', 'vigo.wei@uhomes.com'),
