@@ -14,6 +14,14 @@ return [
     // 命令会递归包含该部门所有子部门的成员
     'department_name' => env('BD_REPORT_DEPARTMENT', '异乡好居留学渠道部'),
 
+    // 排除不参与日报的 userid 列表（逗号分隔）。
+    // 默认排除 userid=1（丁宁，非 BD 岗）。如需更多排除，在 .env 里追加，如：
+    //   BD_REPORT_EXCLUDE_USERIDS=1,5,12
+    'exclude_userids' => array_values(array_filter(array_map(
+        fn($v) => (int) trim($v),
+        explode(',', (string) env('BD_REPORT_EXCLUDE_USERIDS', '1'))
+    ))),
+
     // 父任务负责人邮箱（韦刚），启动时按 email 解析 userid
     'parent_owner_email' => env('BD_REPORT_PARENT_OWNER_EMAIL', 'vigo.wei@uhomes.com'),
 

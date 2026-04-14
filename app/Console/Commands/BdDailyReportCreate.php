@@ -97,14 +97,18 @@ class BdDailyReportCreate extends Command
             $frontier = $newIds;
         }
         // users.department 字段为 ",id1,id2," 格式，逐个 id 做 LIKE OR
-        $bdUsers = User::whereNull('disable_at')
+        $excludeIds = array_map('intval', (array) config('bd_daily_report.exclude_userids', []));
+        $query = User::whereNull('disable_at')
             ->where(function ($q) use ($deptIds) {
                 foreach ($deptIds as $did) {
                     $q->orWhere('department', 'like', "%,{$did},%");
                 }
             })
-            ->orderBy('userid')
-            ->get();
+            ->orderBy('userid');
+        if (!empty($excludeIds)) {
+            $query->whereNotIn('userid', $excludeIds);
+        }
+        $bdUsers = $query->get();
         if ($bdUsers->isEmpty()) {
             BdDailyReportNotifier::alert("部门 '{$deptName}' 无启用成员", $parentOwner->userid);
             return 1;
