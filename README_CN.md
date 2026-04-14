@@ -44,6 +44,66 @@ python3 task-notify/notify.py
 echo '* * * * * root /opt/task-notify/venv/bin/python3 /opt/task-notify/notify.py' > /etc/cron.d/task-notify
 ```
 
+### BD 日报自动化（Artisan Schedule）
+
+在 `留学渠道全员任务` 项目里，每个工作日自动为每位 BD 建一条**独立主任务**（标题 `{昵称} YYYY-MM-DD 日报`），18:00 对未完成的任务负责人发站内 + 邮件催交。
+
+每人有独立任务详情页，可在描述区填写日报内容、评论补充、上传附件，完成后点"完成"按钮。
+
+| 项 | 值 |
+|---|---|
+| 任务结构 | 每 BD 一条独立主任务（`parent_id=0`），非父子任务 |
+| 创建时间 | 工作日 09:00 |
+| 催交时间 | 工作日 18:00（站内 + 邮件） |
+| 工作日定义 | 周一~周五 且 非中国法定节假日（通过 `timor.tech` API 判断，API 失败降级为周末规则） |
+| BD 名单来源 | `异乡好居留学渠道部` 部门（递归包含所有子部门） |
+| 排除名单 | 默认排除 `userid=1`，可通过 `BD_REPORT_EXCLUDE_USERIDS` 追加 |
+| 模板 | 当前不预填，BD 在描述区自由填写（结构化解析方向已留档，见设计文档） |
+| 实现 | 2 条 Artisan 命令 + `LaravelScheduleJob` 触发 |
+
+**环境变量**（`.env`）：
+
+| 变量 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `LARAVELS_TIMER` | 是 | `false` | 必须设 `true`，否则 schedule 不会触发 |
+| `BD_REPORT_PROJECT` | 否 | `留学渠道全员任务` | 项目名 |
+| `BD_REPORT_DEPARTMENT` | 否 | `异乡好居留学渠道部` | 根部门名 |
+| `BD_REPORT_PARENT_OWNER_EMAIL` | 否 | `vigo.wei@uhomes.com` | 父任务负责人邮箱 |
+| `BD_REPORT_EXCLUDE_USERIDS` | 否 | `1` | 排除的 userid（逗号分隔） |
+| `BD_REPORT_TASK_URL_BASE` | 否 | `https://task.critvo.com` | 催交链接基址 |
+| `BD_REPORT_HOLIDAY_API` | 否 | `https://timor.tech/api/holiday/info/` | 节假日 API |
+| `BD_REPORT_ALERT_ENABLED` | 否 | `true` | 告警开关 |
+
+**手动命令**：
+
+```bash
+# 预览当日建任务计划（不落库）
+sudo docker exec dootask-php-3185cf php artisan bd-daily-report:create --dry-run
+
+# 立即创建当日任务
+sudo docker exec dootask-php-3185cf php artisan bd-daily-report:create
+
+# 预览当日催交名单
+sudo docker exec dootask-php-3185cf php artisan bd-daily-report:remind --dry-run
+
+# 立即催交
+sudo docker exec dootask-php-3185cf php artisan bd-daily-report:remind
+
+# 指定日期（补建历史/测试）
+sudo docker exec dootask-php-3185cf php artisan bd-daily-report:create --date=2026-04-14
+```
+
+**相关文件**：
+
+- `app/Console/Commands/BdDailyReportCreate.php` — 建任务命令
+- `app/Console/Commands/BdDailyReportRemind.php` — 催交命令
+- `app/Module/HolidayClient.php` — 节假日 API 客户端
+- `app/Module/BdDailyReportNotifier.php` — 站内/邮件/告警封装
+- `config/bd_daily_report.php` — 配置
+- `app/Console/Kernel.php` — schedule 注册（工作日 09:00 / 18:00）
+
+设计文档见 `../docs/DESIGN_2026-04-14_BD_DAILY_REPORT.md`。
+
 ---
 
 ## 📍 0.x 迁移到 1.x
