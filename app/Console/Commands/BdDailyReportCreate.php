@@ -114,16 +114,28 @@ class BdDailyReportCreate extends Command
             return 1;
         }
 
-        // 6. 幂等：当日任务已存在则跳过
-        $taskTitle = "{$dateStr} BD 日报";
-        $exists = ProjectTask::whereProjectId($project->id)
-            ->where('name', $taskTitle)
+        // 6. 幂等：逐人判断当日个人任务是否已存在，收集待创建列表
+        //    任务标题格式：`{昵称} {日期} 日报`（独立主任务，parent_id=0）
+        $existingNames = ProjectTask::whereProjectId($project->id)
+            ->where('parent_id', 0)
+            ->where('name', 'like', "%{$dateStr} 日报")
             ->whereNull('archived_at')
             ->whereNull('deleted_at')
-            ->exists();
-        if ($exists) {
-            $this->info("[{$dateStr}] 任务已存在，跳过");
-            Log::info("[BdDailyReport] {$dateStr} task already exists, skipped");
+            ->pluck('name')
+            ->toArray();
+
+        $toCreate = [];
+        foreach ($bdUsers as $u) {
+            $taskName = "{$u->nickname} {$dateStr} 日报";
+            if (in_array($taskName, $existingNames, true)) {
+                continue;
+            }
+            $toCreate[] = ['user' => $u, 'name' => $taskName];
+        }
+
+        if (empty($toCreate)) {
+            $this->info("[{$dateStr}] 全体 BD 今日任务均已存在，跳过");
+            Log::info("[BdDailyReport] {$dateStr} all tasks already exist, skipped");
             return 0;
         }
 
@@ -132,17 +144,17 @@ class BdDailyReportCreate extends Command
             $this->info("[DRY-RUN] 日期：{$dateStr}");
             $this->info("[DRY-RUN] 项目：{$project->name} (id={$project->id})");
             $this->info("[DRY-RUN] 列表：{$column->name} (id={$column->id})");
-            $this->info("[DRY-RUN] 父任务：{$taskTitle}");
-            $this->info("[DRY-RUN] 父任务负责人：{$parentOwner->nickname} (userid={$parentOwner->userid})");
-            $this->info("[DRY-RUN] 子任务数：" . $bdUsers->count());
-            foreach ($bdUsers as $u) {
-                $this->line("  - {$u->nickname} 日报 (userid={$u->userid}, email={$u->email})");
+            $this->info("[DRY-RUN] 创建人：{$parentOwner->nickname} (userid={$parentOwner->userid})");
+            $this->info("[DRY-RUN] 待创建任务数：" . count($toCreate));
+            foreach ($toCreate as $item) {
+                $this->line("  - {$item['name']} (owner={$item['user']->nickname}, userid={$item['user']->userid})");
             }
             return 0;
         }
 
         // 8. 确保所有相关用户是项目成员
-        $allUserids = $bdUsers->pluck('userid')->push($parentOwner->userid)->unique()->values();
+        $allUserids = collect($toCreate)->map(fn($i) => (int) $i['user']->userid)
+            ->push((int) $parentOwner->userid)->unique()->values();
         foreach ($allUserids as $uid) {
             $exists = ProjectUser::whereProjectId($project->id)->whereUserid($uid)->exists();
             if (!$exists) {
@@ -154,74 +166,55 @@ class BdDailyReportCreate extends Command
             }
         }
 
-        // 9. 创建父任务 + 子任务（事务）
+        // 9. 逐人创建独立主任务（失败不中断其他人）
         $startAt = $date->copy()->setTime(9, 0, 0);
         $endAt = $date->copy()->setTime(23, 59, 0);
         $creatorUserid = (int) $parentOwner->userid;
 
-        try {
-            DB::transaction(function () use ($project, $column, $parentOwner, $bdUsers, $taskTitle, $startAt, $endAt, $creatorUserid) {
-                // 父任务
-                $parentSort = (int) ProjectTask::whereColumnId($column->id)->max('sort') + 1;
-                $parent = ProjectTask::createInstance([
-                    'parent_id' => 0,
-                    'project_id' => $project->id,
-                    'column_id' => $column->id,
-                    'name' => $taskTitle,
-                    'userid' => $creatorUserid,
-                    'start_at' => $startAt,
-                    'end_at' => $endAt,
-                    'p_level' => 0,
-                    'p_name' => '',
-                    'p_color' => '',
-                    'sort' => $parentSort,
-                    'visibility' => 1,
-                ]);
-                $parent->save();
-                ProjectTaskUser::createInstance([
-                    'project_id' => $project->id,
-                    'task_id' => $parent->id,
-                    'task_pid' => $parent->id,
-                    'userid' => $creatorUserid,
-                    'owner' => 1,
-                ])->save();
-
-                // 子任务
-                $subSort = 1;
-                foreach ($bdUsers as $u) {
-                    $subName = "{$u->nickname} 日报";
-                    $sub = ProjectTask::createInstance([
-                        'parent_id' => $parent->id,
+        $created = 0;
+        $failedNames = [];
+        foreach ($toCreate as $item) {
+            try {
+                DB::transaction(function () use ($project, $column, $item, $creatorUserid, $startAt, $endAt) {
+                    $sort = (int) ProjectTask::whereColumnId($column->id)->max('sort') + 1;
+                    $task = ProjectTask::createInstance([
+                        'parent_id' => 0,
                         'project_id' => $project->id,
                         'column_id' => $column->id,
-                        'name' => $subName,
+                        'name' => $item['name'],
                         'userid' => $creatorUserid,
                         'start_at' => $startAt,
                         'end_at' => $endAt,
                         'p_level' => 0,
                         'p_name' => '',
                         'p_color' => '',
-                        'sort' => $subSort++,
+                        'sort' => $sort,
                         'visibility' => 1,
                     ]);
-                    $sub->save();
+                    $task->save();
                     ProjectTaskUser::createInstance([
                         'project_id' => $project->id,
-                        'task_id' => $sub->id,
-                        'task_pid' => $parent->id,
-                        'userid' => (int) $u->userid,
+                        'task_id' => $task->id,
+                        'task_pid' => $task->id,
+                        'userid' => (int) $item['user']->userid,
                         'owner' => 1,
                     ])->save();
-                }
-            });
-        } catch (\Throwable $e) {
-            BdDailyReportNotifier::alert("[{$dateStr}] 创建任务失败：{$e->getMessage()}", $parentOwner->userid);
-            Log::error('[BdDailyReport] create failed: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
-            return 1;
+                });
+                $created++;
+            } catch (\Throwable $e) {
+                $failedNames[] = $item['name'];
+                Log::error('[BdDailyReport] create task failed for ' . $item['name'] . ': ' . $e->getMessage());
+            }
         }
 
-        $this->info("[{$dateStr}] 创建成功，子任务数：" . $bdUsers->count());
-        Log::info("[BdDailyReport] {$dateStr} created, subtasks=" . $bdUsers->count());
+        $this->info("[{$dateStr}] 创建 {$created}/" . count($toCreate));
+        Log::info("[BdDailyReport] {$dateStr} created {$created}/" . count($toCreate));
+        if (!empty($failedNames)) {
+            BdDailyReportNotifier::alert(
+                "[{$dateStr}] 部分 BD 任务创建失败：" . implode(', ', $failedNames),
+                $parentOwner->userid
+            );
+        }
         return 0;
     }
 }

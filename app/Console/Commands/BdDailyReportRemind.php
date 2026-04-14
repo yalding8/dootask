@@ -17,7 +17,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 /**
- * 工作日 18:00 扫当日父任务下所有未完成子任务，对负责人推送站内消息 + 邮件。
+ * 工作日 18:00 扫当日所有"{姓名} {日期} 日报"独立主任务（未完成），对负责人推送站内 + 邮件。
  */
 class BdDailyReportRemind extends Command
 {
@@ -25,7 +25,7 @@ class BdDailyReportRemind extends Command
         {--dry-run : 仅打印待催交名单，不发送}
         {--date= : 覆盖日期（YYYY-MM-DD），默认为今天}';
 
-    protected $description = '[BD 日报] 对未完成子任务的负责人发送站内 + 邮件催交';
+    protected $description = '[BD 日报] 对未完成日报的负责人发送站内 + 邮件催交';
 
     public function handle(): int
     {
@@ -50,33 +50,24 @@ class BdDailyReportRemind extends Command
             return 1;
         }
 
-        $taskTitle = "{$dateStr} BD 日报";
-        $parent = ProjectTask::whereProjectId($project->id)
-            ->where('name', $taskTitle)
-            ->whereNull('archived_at')
-            ->whereNull('deleted_at')
-            ->first();
-        if (!$parent) {
-            BdDailyReportNotifier::alert("当日父任务 '{$taskTitle}' 未找到，催交跳过（是否早上 9 点创建步骤失败？）");
-            return 1;
-        }
-
-        // 拉所有未完成子任务
-        $pendingSubs = ProjectTask::where('parent_id', $parent->id)
+        // 拉当日所有未完成的 BD 日报主任务（每人一条）
+        $pendingTasks = ProjectTask::whereProjectId($project->id)
+            ->where('parent_id', 0)
+            ->where('name', 'like', "%{$dateStr} 日报")
             ->whereNull('complete_at')
             ->whereNull('archived_at')
             ->whereNull('deleted_at')
             ->get();
 
-        if ($pendingSubs->isEmpty()) {
-            $this->info("[{$dateStr}] 全员已提交，无需催交");
-            Log::info("[BdDailyReport] {$dateStr} all submitted, no remind");
+        if ($pendingTasks->isEmpty()) {
+            $this->info("[{$dateStr}] 无待催交任务（全部已完成、或今日未创建）");
+            Log::info("[BdDailyReport] {$dateStr} no pending tasks to remind");
             return 0;
         }
 
-        // 收集未完成子任务的负责人（owner=1）
-        $subIds = $pendingSubs->pluck('id')->toArray();
-        $ownerRows = ProjectTaskUser::whereIn('task_id', $subIds)
+        // 收集任务负责人（owner=1）
+        $taskIds = $pendingTasks->pluck('id')->toArray();
+        $ownerRows = ProjectTaskUser::whereIn('task_id', $taskIds)
             ->where('owner', 1)
             ->get();
         $taskOwnerMap = []; // task_id => [userid, ...]
@@ -88,20 +79,20 @@ class BdDailyReportRemind extends Command
         $sent = 0;
         $failed = [];
 
-        foreach ($pendingSubs as $sub) {
-            $owners = $taskOwnerMap[$sub->id] ?? [];
+        foreach ($pendingTasks as $t) {
+            $owners = $taskOwnerMap[$t->id] ?? [];
             foreach ($owners as $uid) {
                 $user = User::whereUserid($uid)->whereNull('disable_at')->first();
                 if (!$user) continue;
 
                 $taskLink = $urlBase !== ''
-                    ? "{$urlBase}/single/task/{$sub->id}"
-                    : "（任务 #{$sub->id}）";
+                    ? "{$urlBase}/single/task/{$t->id}"
+                    : "（任务 #{$t->id}）";
                 $title = '日报未提交提醒';
-                $contentTxt = "今日日报『{$sub->name}』尚未提交，请于 23:59 前完成：{$taskLink}";
+                $contentTxt = "今日日报『{$t->name}』尚未提交，请于 23:59 前完成：{$taskLink}";
 
                 if ($this->option('dry-run')) {
-                    $this->line("[DRY-RUN] -> {$user->nickname} ({$user->email}) | sub_id={$sub->id}");
+                    $this->line("[DRY-RUN] -> {$user->nickname} ({$user->email}) | task_id={$t->id}");
                     continue;
                 }
 
