@@ -87,22 +87,10 @@ def shell(cmd, timeout=30):
         return f'(出错: {e})'
 
 
-def collect_top_dirs():
-    raw = shell(
-        "for d in /var /opt /home /root /tmp /usr; do "
-        "du -sh \"$d\" 2>/dev/null; done | sort -hr | head -5",
-        timeout=90,
-    )
-    # 把 "21G\t/var" 重新对齐成 "  21 GB   /var"
-    lines = []
-    for line in raw.splitlines():
-        parts = line.split('\t')
-        if len(parts) == 2:
-            size, path = parts
-            lines.append(f'  {size:>7}  {path}')
-        else:
-            lines.append('  ' + line)
-    return '\n'.join(lines) if lines else '  (无数据)'
+def collect_partitions():
+    """各分区 df 输出（瞬时，不递归扫描，告警不会因 I/O 卡死）。"""
+    raw = shell('df -h --output=source,size,used,avail,pcent,target -x tmpfs -x devtmpfs', timeout=5)
+    return '\n'.join(f'  {line}' for line in raw.splitlines())
 
 
 def collect_docker():
@@ -158,9 +146,9 @@ def build_email(pct, used_gb, free_gb, total_gb):
   总量     {total_gb:.1f} GB
 
 {sep_da}
-  最大目录 Top 5
+  各分区
 {sep_da}
-{collect_top_dirs()}
+{collect_partitions()}
 
 {sep_da}
   Docker 占用
@@ -168,8 +156,15 @@ def build_email(pct, used_gb, free_gb, total_gb):
 {collect_docker()}
 
 {sep_da}
-  常见清理命令
+  收到告警后手动排查（在服务器上跑）
 {sep_da}
+  # 1. 看 / 下哪个目录吃磁盘
+  sudo du -sh /var /opt /home /root /tmp /usr 2>/dev/null | sort -hr
+
+  # 2. Docker 占用细分
+  sudo docker images --format 'table {{{{.Repository}}}}\\t{{{{.Tag}}}}\\t{{{{.Size}}}}' | sort -k3 -hr
+
+  # 3. 清理（按需）
   sudo docker builder prune -f
   sudo docker image prune -f
   sudo journalctl --vacuum-size=200M
