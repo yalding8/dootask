@@ -88,8 +88,13 @@ def shell(cmd, timeout=30):
 
 
 def collect_partitions():
-    """各分区 df 输出（瞬时，不递归扫描，告警不会因 I/O 卡死）。"""
-    raw = shell('df -h --output=source,size,used,avail,pcent,target -x tmpfs -x devtmpfs', timeout=5)
+    """各分区 df 输出（瞬时，不递归扫描，告警不会因 I/O 卡死）。
+    过滤掉 docker overlay / 系统虚拟挂载，只留真实物理分区。"""
+    raw = shell(
+        'df -h --output=source,size,used,avail,pcent,target '
+        '-x tmpfs -x devtmpfs -x overlay -x efivarfs -x squashfs',
+        timeout=5,
+    )
     return '\n'.join(f'  {line}' for line in raw.splitlines())
 
 
