@@ -9,15 +9,20 @@
 - 默认阈值 85%
 - 同一告警 4 小时内只发一次（防风暴）
 - 邮件正文附磁盘 Top 5 大目录 + Docker 占用诊断信息
-- 主题含 hostname 便于多机器区分
-- 支持 THRESHOLD / RECIPIENTS 环境变量覆盖默认值（用于测试）
+- 主题含 SERVER_LABEL（默认 hostname）便于多机器区分
+- 数字与 df 对齐（排除文件系统 root 保留块）
 
 部署：
-  scp 到 /opt/task-notify/disk_alert.py
+  curl 下载到 /opt/task-notify/disk_alert.py
   cron: */30 * * * * root /opt/task-notify/venv/bin/python3 /opt/task-notify/disk_alert.py
 
+环境变量（可选，覆盖默认）:
+  SERVER_LABEL  服务器标识（默认 os.uname().nodename）
+  THRESHOLD     使用率告警阈值（默认 85，单位 %）
+  RECIPIENTS    收件人列表（默认 ning.ding@uhomes.com，多个用 , 分隔）
+
 测试（强制触发）:
-  THRESHOLD=50 sudo /opt/task-notify/venv/bin/python3 /opt/task-notify/disk_alert.py
+  sudo bash -c "THRESHOLD=10 /opt/task-notify/venv/bin/python3 /opt/task-notify/disk_alert.py"
 """
 import configparser
 import os
@@ -33,21 +38,30 @@ CONFIG = '/opt/task-notify/config.ini'
 DEFAULT_THRESHOLD = 85
 DEFAULT_RECIPIENTS = ['ning.ding@uhomes.com']
 STATE_FILE = '/var/tmp/disk-alert-last-sent'
-ALERT_INTERVAL = 4 * 3600  # seconds
+ALERT_INTERVAL = 4 * 3600  # 同一告警最少间隔（秒）
 
-# 允许通过环境变量覆盖（测试用）
+# 环境变量覆盖
 THRESHOLD = int(os.environ.get('THRESHOLD', DEFAULT_THRESHOLD))
 RECIPIENTS = [
     x.strip() for x in os.environ.get(
         'RECIPIENTS', ','.join(DEFAULT_RECIPIENTS)
     ).split(',') if x.strip()
 ]
+SERVER_LABEL = os.environ.get('SERVER_LABEL') or os.uname().nodename
 
 
 def disk_stats():
-    total, used, free = shutil.disk_usage('/')
-    pct = used * 100 // total
-    return pct, used // (1024 ** 3), free // (1024 ** 3), total // (1024 ** 3)
+    """
+    返回与 df 一致的磁盘统计：用户可用总量 = used + free
+    （shutil 的 total 含 root 保留块，会和 df 对不上）
+    """
+    usage = shutil.disk_usage('/')
+    used_b = usage.used
+    free_b = usage.free
+    user_total_b = used_b + free_b
+    pct = round(used_b * 100 / user_total_b) if user_total_b else 0
+    gb = lambda b: b / (1024 ** 3)
+    return pct, gb(used_b), gb(free_b), gb(user_total_b)
 
 
 def already_alerted_recently():
@@ -62,63 +76,110 @@ def mark_alerted():
 
 
 def shell(cmd, timeout=30):
-    """运行 shell 命令，返回 stdout（失败返回错误说明）。"""
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, timeout=timeout,
         )
-        return result.stdout.strip() or '(empty)'
+        return result.stdout.strip() or '(空)'
     except subprocess.TimeoutExpired:
-        return f'(timeout after {timeout}s — disk possibly thrashing)'
+        return f'(超时 {timeout}s — 磁盘可能 I/O 拥堵)'
     except Exception as e:
-        return f'(error: {e})'
+        return f'(出错: {e})'
 
 
-def collect_diagnostics():
-    """收集磁盘 Top 5 目录 + Docker 占用，给运维直接看到清哪里。"""
-    sections = []
-
-    sections.append('【最大目录 Top 5】(du -sh /<dir>，仅一级)')
-    top_dirs = shell(
+def collect_top_dirs():
+    raw = shell(
         "for d in /var /opt /home /root /tmp /usr; do "
         "du -sh \"$d\" 2>/dev/null; done | sort -hr | head -5",
         timeout=90,
     )
-    sections.append(top_dirs)
+    # 把 "21G\t/var" 重新对齐成 "  21 GB   /var"
+    lines = []
+    for line in raw.splitlines():
+        parts = line.split('\t')
+        if len(parts) == 2:
+            size, path = parts
+            lines.append(f'  {size:>7}  {path}')
+        else:
+            lines.append('  ' + line)
+    return '\n'.join(lines) if lines else '  (无数据)'
 
-    sections.append('')
-    sections.append('【Docker 占用】(docker system df)')
-    docker_df = shell('docker system df 2>&1', timeout=10)
-    sections.append(docker_df)
 
-    return '\n'.join(sections)
+def collect_docker():
+    raw = shell('docker system df 2>&1', timeout=10)
+    # 提取出 Images / Containers / Local Volumes / Build Cache 行
+    lines = []
+    header_seen = False
+    for line in raw.splitlines():
+        if line.startswith('TYPE'):
+            header_seen = True
+            continue
+        if not header_seen:
+            continue
+        # docker system df 输出列：TYPE TOTAL ACTIVE SIZE RECLAIMABLE
+        # 用空格切，最后两个字段是 SIZE / RECLAIMABLE
+        cols = line.split()
+        if len(cols) < 5:
+            continue
+        # 类型可能是 "Local Volumes" / "Build Cache" 两个词
+        if cols[0] == 'Local' and cols[1] == 'Volumes':
+            kind = 'Volumes'
+            rest = cols[2:]
+        elif cols[0] == 'Build' and cols[1] == 'Cache':
+            kind = 'Build Cache'
+            rest = cols[2:]
+        else:
+            kind = cols[0]
+            rest = cols[1:]
+        if len(rest) < 4:
+            continue
+        size = rest[2]
+        reclaim = rest[3] if len(rest) >= 4 else '-'
+        # RECLAIMABLE 可能含括号 "(91%)" — 拼回去
+        if len(rest) >= 5 and rest[4].startswith('('):
+            reclaim = f'{reclaim} {rest[4]}'
+        lines.append(f'  {kind:<12}  {size:>10}  {reclaim:>14}')
+    if not lines:
+        return '  (docker system df 无输出)'
+    header = f'  {"类型":<10}  {"占用":>10}  {"可回收":>14}'
+    return header + '\n' + '\n'.join(lines)
 
 
-def build_email(pct, used_gb, free_gb, total_gb, hostname):
-    body = f"""服务器 {hostname} 磁盘告警
+def build_email(pct, used_gb, free_gb, total_gb):
+    sep_eq = '═' * 42
+    sep_da = '─' * 42
+    body = f"""{sep_eq}
+  磁盘告警 · {SERVER_LABEL}
+{sep_eq}
 
-使用率: {pct}%
-已用:   {used_gb} GB
-剩余:   {free_gb} GB
-总量:   {total_gb} GB
-阈值:   {THRESHOLD}%
+  使用率   {pct}%   /   阈值 {THRESHOLD}%
+  已用     {used_gb:.1f} GB
+  可用     {free_gb:.1f} GB
+  总量     {total_gb:.1f} GB
 
-------------------------------------------------------------
-{collect_diagnostics()}
-------------------------------------------------------------
+{sep_da}
+  最大目录 Top 5
+{sep_da}
+{collect_top_dirs()}
 
-常见清理：
+{sep_da}
+  Docker 占用
+{sep_da}
+{collect_docker()}
+
+{sep_da}
+  常见清理命令
+{sep_da}
   sudo docker builder prune -f
   sudo docker image prune -f
   sudo journalctl --vacuum-size=200M
 
--- disk_alert.py
+—— disk_alert.py
 """
     return body
 
 
 def send_alert(pct, used_gb, free_gb, total_gb):
-    hostname = os.uname().nodename
     cfg = configparser.ConfigParser()
     cfg.read(CONFIG)
     if 'smtp' not in cfg:
@@ -126,11 +187,11 @@ def send_alert(pct, used_gb, free_gb, total_gb):
         return False
     s = cfg['smtp']
 
-    body = build_email(pct, used_gb, free_gb, total_gb, hostname)
+    body = build_email(pct, used_gb, free_gb, total_gb)
     msg = MIMEText(body, 'plain', 'utf-8')
     msg['From'] = formataddr((s.get('from_name', 'DooTask 监控'), s['account']))
     msg['To'] = ', '.join(RECIPIENTS)
-    msg['Subject'] = f'[告警][{hostname}] 服务器磁盘 {pct}%'
+    msg['Subject'] = f'[告警][{SERVER_LABEL}] 磁盘 {pct}%'
 
     try:
         smtp = smtplib.SMTP(s['server'], int(s['port']), timeout=15)
@@ -149,10 +210,8 @@ def send_alert(pct, used_gb, free_gb, total_gb):
 def main():
     pct, used_gb, free_gb, total_gb = disk_stats()
     if pct < THRESHOLD:
-        # 静默退出，cron 不会产生输出
         sys.exit(0)
     if already_alerted_recently():
-        # 防风暴：4 小时内已经告警过，跳过
         sys.exit(0)
     ok = send_alert(pct, used_gb, free_gb, total_gb)
     sys.exit(0 if ok else 1)
