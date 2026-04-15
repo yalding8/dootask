@@ -53,4 +53,13 @@ return [
 
     // 任务链接基址（用于催交站内/邮件里的链接）
     'task_url_base' => env('BD_REPORT_TASK_URL_BASE', ''),
+
+    // 每个主任务下要挂的子任务清单（DooTask checklist 复选项），逗号分隔
+    // 例：BD_REPORT_SUBTASK_TITLES=租赁商机,新增合作方,新增租赁成单,...
+    // 留空则不建子任务（仅一条独立主任务）
+    // 改动模板不追溯——已建任务的子任务不会跟着变
+    'subtask_titles' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('BD_REPORT_SUBTASK_TITLES', ''))
+    ))),
 ];

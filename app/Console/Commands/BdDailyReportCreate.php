@@ -164,13 +164,24 @@ class BdDailyReportCreate extends Command
             return 0;
         }
 
+        $subtaskTitles = (array) config('bd_daily_report.subtask_titles', []);
+
         // 7. dry-run：只打印计划
         if ($this->option('dry-run')) {
             $this->info("[DRY-RUN] 日期：{$dateStr}");
             $this->info("[DRY-RUN] 项目：{$project->name} (id={$project->id})");
             $this->info("[DRY-RUN] 列表：{$column->name} (id={$column->id})");
             $this->info("[DRY-RUN] 创建人：{$parentOwner->nickname} (userid={$parentOwner->userid})");
-            $this->info("[DRY-RUN] 待创建任务数：" . count($toCreate));
+            $this->info("[DRY-RUN] 待创建主任务数：" . count($toCreate));
+            if (!empty($subtaskTitles)) {
+                $this->info("[DRY-RUN] 每个主任务挂子任务（" . count($subtaskTitles) . " 条）：");
+                foreach ($subtaskTitles as $t) {
+                    $this->line("    · {$t}");
+                }
+            } else {
+                $this->info("[DRY-RUN] 不挂子任务（BD_REPORT_SUBTASK_TITLES 未配置）");
+            }
+            $this->info("[DRY-RUN] BD 名单：");
             foreach ($toCreate as $item) {
                 $this->line("  - {$item['name']} (owner={$item['user']->nickname}, userid={$item['user']->userid})");
             }
@@ -200,7 +211,7 @@ class BdDailyReportCreate extends Command
         $failedNames = [];
         foreach ($toCreate as $item) {
             try {
-                DB::transaction(function () use ($project, $column, $item, $creatorUserid, $startAt, $endAt) {
+                DB::transaction(function () use ($project, $column, $item, $creatorUserid, $startAt, $endAt, $subtaskTitles) {
                     $sort = (int) ProjectTask::whereColumnId($column->id)->max('sort') + 1;
                     $task = ProjectTask::createInstance([
                         'parent_id' => 0,
@@ -224,6 +235,33 @@ class BdDailyReportCreate extends Command
                         'userid' => (int) $item['user']->userid,
                         'owner' => 1,
                     ])->save();
+
+                    // 子任务（DooTask checklist），按模板顺序挂在主任务下
+                    $subSort = 1;
+                    foreach ($subtaskTitles as $subTitle) {
+                        $sub = ProjectTask::createInstance([
+                            'parent_id' => $task->id,
+                            'project_id' => $project->id,
+                            'column_id' => $column->id,
+                            'name' => $subTitle,
+                            'userid' => $creatorUserid,
+                            'start_at' => $startAt,
+                            'end_at' => $endAt,
+                            'p_level' => 0,
+                            'p_name' => '',
+                            'p_color' => '',
+                            'sort' => $subSort++,
+                            'visibility' => 1,
+                        ]);
+                        $sub->save();
+                        ProjectTaskUser::createInstance([
+                            'project_id' => $project->id,
+                            'task_id' => $sub->id,
+                            'task_pid' => $task->id,
+                            'userid' => (int) $item['user']->userid,
+                            'owner' => 1,
+                        ])->save();
+                    }
                 });
                 $created++;
             } catch (\Throwable $e) {

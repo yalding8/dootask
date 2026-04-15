@@ -76,6 +76,7 @@ echo '* * * * * root /opt/task-notify/venv/bin/python3 /opt/task-notify/notify.p
 | `BD_REPORT_TASK_URL_BASE` | ✅ | `https://task.example.com` | 催交邮件/站内消息里的任务链接基址 |
 | `BD_REPORT_HOLIDAY_API` | 否 | `https://timor.tech/api/holiday/info/` | 节假日 API |
 | `BD_REPORT_ALERT_ENABLED` | 否 | `true` | 告警开关（false 时仅写日志不推送） |
+| `BD_REPORT_SUBTASK_TITLES` | 否 | （空） | 每个主任务下挂的子任务清单（DooTask checklist），逗号分隔。例：`租赁商机,新增合作方,新增租赁成单,新增学费成单,是否达成最低预算,其他工作`。空则不挂子任务 |
 
 **手动命令**：
 
