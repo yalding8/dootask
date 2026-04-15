@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 dingning.ai
+# License: MIT
+#
+# 注意：本文件托管在 yalding8/dootask（AGPL-3.0）fork 仓库内，
+# 但本身**不是 DooTask 的衍生作品** — 不 import DooTask 任何代码、
+# 不依赖 DooTask 运行时（仅复用同主机的 task-notify SMTP 配置）。
+# AGPL "mere aggregation" 原则下，本文件仍以 MIT 协议发布。
 """
 磁盘空间告警脚本（uhomes 内部运维工具）。
 
