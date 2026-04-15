@@ -10,9 +10,16 @@ return [
     // 项目名（DooTask 里必须已存在同名项目）
     'project_name' => env('BD_REPORT_PROJECT', '留学渠道全员任务'),
 
-    // 根部门名（DooTask 里 user_departments.name）
-    // 命令会递归包含该部门所有子部门的成员
-    'department_name' => env('BD_REPORT_DEPARTMENT', '异乡好居留学渠道部'),
+    // 根部门 ID 列表（推荐用 ID 定位，因为部门名可能被改）
+    // 多个用逗号分隔，命令会递归包含这些部门的所有子部门成员
+    // 例：BD_REPORT_DEPARTMENT_IDS=1   或   BD_REPORT_DEPARTMENT_IDS=1,2
+    'department_ids' => array_values(array_filter(array_map(
+        fn($v) => (int) trim($v),
+        explode(',', (string) env('BD_REPORT_DEPARTMENT_IDS', ''))
+    ))),
+
+    // 根部门名（兼容老配置，仅在 department_ids 为空时使用）
+    'department_name' => env('BD_REPORT_DEPARTMENT', '异乡好居留学渠道与金融推广部'),
 
     // 排除不参与日报的 userid 列表（逗号分隔）。
     // 默认排除 userid=1（丁宁，非 BD 岗）。如需更多排除，在 .env 里追加，如：

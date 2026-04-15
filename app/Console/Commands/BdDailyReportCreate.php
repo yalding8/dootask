@@ -79,16 +79,36 @@ class BdDailyReportCreate extends Command
             return 1;
         }
 
-        // 5. 查 BD 部门成员（根部门 + 所有递归子部门，全量含管理成员）
-        $deptName = (string) config('bd_daily_report.department_name');
-        $dept = UserDepartment::where('name', $deptName)->first();
-        if (!$dept) {
-            BdDailyReportNotifier::alert("部门 '{$deptName}' 不存在，可能已改名", $parentOwner->userid);
-            return 1;
+        // 5. 查 BD 根部门（优先按 ID，回退按 name）
+        $rootIds = [];
+        $configIds = (array) config('bd_daily_report.department_ids', []);
+        if (!empty($configIds)) {
+            $existing = UserDepartment::whereIn('id', $configIds)->pluck('id')->map(fn($v) => (int) $v)->toArray();
+            $missing = array_values(array_diff(array_map('intval', $configIds), $existing));
+            if (!empty($missing)) {
+                BdDailyReportNotifier::alert(
+                    '配置的根部门 ID 不存在: ' . implode(',', $missing) . '（已跳过）',
+                    $parentOwner->userid
+                );
+            }
+            $rootIds = $existing;
         }
-        // 递归收集子部门 id
-        $deptIds = [(int) $dept->id];
-        $frontier = [(int) $dept->id];
+        if (empty($rootIds)) {
+            $deptName = (string) config('bd_daily_report.department_name');
+            $dept = UserDepartment::where('name', $deptName)->first();
+            if (!$dept) {
+                BdDailyReportNotifier::alert(
+                    "未配置 BD_REPORT_DEPARTMENT_IDS，且按名字 '{$deptName}' 未找到部门。请设置 BD_REPORT_DEPARTMENT_IDS",
+                    $parentOwner->userid
+                );
+                return 1;
+            }
+            $rootIds = [(int) $dept->id];
+        }
+
+        // 递归收集所有子部门 id（支持多根）
+        $deptIds = array_values(array_unique(array_map('intval', $rootIds)));
+        $frontier = $deptIds;
         while (!empty($frontier)) {
             $children = UserDepartment::whereIn('parent_id', $frontier)->pluck('id')->toArray();
             $newIds = array_values(array_diff($children, $deptIds));
