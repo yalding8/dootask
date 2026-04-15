@@ -134,23 +134,28 @@ class BdDailyReportCreate extends Command
             return 1;
         }
 
-        // 6. 幂等：逐人判断当日个人任务是否已存在，收集待创建列表
+        // 6. 幂等：用 userid 判重（昵称可能改动，名字判重会产生重复任务）
         //    任务标题格式：`{昵称} {日期} 日报`（独立主任务，parent_id=0）
-        $existingNames = ProjectTask::whereProjectId($project->id)
-            ->where('parent_id', 0)
-            ->where('name', 'like', "%{$dateStr} 日报")
-            ->whereNull('archived_at')
-            ->whereNull('deleted_at')
-            ->pluck('name')
+        $existingOwnerIds = DB::table('project_tasks')
+            ->join('project_task_users', function ($j) {
+                $j->on('project_task_users.task_id', '=', 'project_tasks.id')
+                    ->where('project_task_users.owner', 1);
+            })
+            ->where('project_tasks.project_id', $project->id)
+            ->where('project_tasks.parent_id', 0)
+            ->where('project_tasks.name', 'like', "%{$dateStr} 日报")
+            ->whereNull('project_tasks.archived_at')
+            ->whereNull('project_tasks.deleted_at')
+            ->pluck('project_task_users.userid')
+            ->map(fn($v) => (int) $v)
             ->toArray();
 
         $toCreate = [];
         foreach ($bdUsers as $u) {
-            $taskName = "{$u->nickname} {$dateStr} 日报";
-            if (in_array($taskName, $existingNames, true)) {
+            if (in_array((int) $u->userid, $existingOwnerIds, true)) {
                 continue;
             }
-            $toCreate[] = ['user' => $u, 'name' => $taskName];
+            $toCreate[] = ['user' => $u, 'name' => "{$u->nickname} {$dateStr} 日报"];
         }
 
         if (empty($toCreate)) {
