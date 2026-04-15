@@ -17,6 +17,7 @@
 
 - `app/Module/Doo.php`：绕过 License 用户数限制（自建部署）
 - `docker/nginx/default.conf`：禁用 appstore 代理（镜像不可用）
+- `resources/assets/js/.../template/file-download.vue`：修复"立即下载"按钮（iView `Button :to` 把 URL 当 vue-router 路由静默失败，改用 `window.open` 主动触发下载，详见 [MODIFICATIONS.md](./MODIFICATIONS.md)）
 
 ### 任务邮件通知系统
 
@@ -56,23 +57,25 @@ echo '* * * * * root /opt/task-notify/venv/bin/python3 /opt/task-notify/notify.p
 | 创建时间 | 工作日 09:00 |
 | 催交时间 | 工作日 18:00（站内 + 邮件） |
 | 工作日定义 | 周一~周五 且 非中国法定节假日（通过 `timor.tech` API 判断，API 失败降级为周末规则） |
-| BD 名单来源 | `异乡好居留学渠道部` 部门（递归包含所有子部门） |
-| 排除名单 | 默认排除 `userid=1`，可通过 `BD_REPORT_EXCLUDE_USERIDS` 追加 |
+| BD 名单来源 | 配置的根部门 ID（推荐）或部门名（fallback），递归包含所有子部门成员 |
+| 幂等判重 | 按 `userid` 判重（昵称中途修改不会重复建任务） |
+| 排除名单 | 通过 `BD_REPORT_EXCLUDE_USERIDS` 显式配置（无内置默认） |
 | 模板 | 当前不预填，BD 在描述区自由填写（结构化解析方向已留档，见设计文档） |
 | 实现 | 2 条 Artisan 命令 + `LaravelScheduleJob` 触发 |
 
-**环境变量**（`.env`）：
+**环境变量**（`.env`，**所有内部业务值需在部署时显式配置，仓库内不带默认值以避免泄露内部信息**）：
 
-| 变量 | 必填 | 默认 | 说明 |
+| 变量 | 必填 | 示例 | 说明 |
 |---|---|---|---|
-| `LARAVELS_TIMER` | 是 | `false` | 必须设 `true`，否则 schedule 不会触发 |
-| `BD_REPORT_PROJECT` | 否 | `留学渠道全员任务` | 项目名 |
-| `BD_REPORT_DEPARTMENT` | 否 | `异乡好居留学渠道部` | 根部门名 |
-| `BD_REPORT_PARENT_OWNER_EMAIL` | 否 | `vigo.wei@uhomes.com` | 父任务负责人邮箱 |
-| `BD_REPORT_EXCLUDE_USERIDS` | 否 | `1` | 排除的 userid（逗号分隔） |
-| `BD_REPORT_TASK_URL_BASE` | 否 | `https://task.critvo.com` | 催交链接基址 |
+| `LARAVELS_TIMER` | ✅ | `true` | 必须 `true` 才会触发 schedule |
+| `BD_REPORT_PROJECT` | ✅ | `项目名` | DooTask 里项目名（必须已存在） |
+| `BD_REPORT_DEPARTMENT_IDS` | ✅（推荐） | `1` 或 `1,2` | 根部门 ID（多个用 `,` 分隔，递归包含子部门）。比按名字匹配更稳——部门改名不影响 |
+| `BD_REPORT_DEPARTMENT` | 否 | `部门全名` | 根部门**名**，仅当 `BD_REPORT_DEPARTMENT_IDS` 为空时作为 fallback |
+| `BD_REPORT_PARENT_OWNER_EMAIL` | ✅ | `owner@example.com` | 父任务负责人邮箱（创建人显示为此用户） |
+| `BD_REPORT_EXCLUDE_USERIDS` | 否 | `1` | 排除的 userid 列表（逗号分隔），如不配置则无人排除 |
+| `BD_REPORT_TASK_URL_BASE` | ✅ | `https://task.example.com` | 催交邮件/站内消息里的任务链接基址 |
 | `BD_REPORT_HOLIDAY_API` | 否 | `https://timor.tech/api/holiday/info/` | 节假日 API |
-| `BD_REPORT_ALERT_ENABLED` | 否 | `true` | 告警开关 |
+| `BD_REPORT_ALERT_ENABLED` | 否 | `true` | 告警开关（false 时仅写日志不推送） |
 
 **手动命令**：
 
@@ -103,6 +106,55 @@ sudo docker exec dootask-php-3185cf php artisan bd-daily-report:create --date=20
 - `app/Console/Kernel.php` — schedule 注册（工作日 09:00 / 18:00）
 
 设计文档见 `../docs/DESIGN_2026-04-14_BD_DAILY_REPORT.md`。
+
+### 运维监控脚本
+
+#### 磁盘告警 `ops/disk_alert.py`
+
+独立监控脚本（**MIT 协议**，非 DooTask 衍生作品）。每 30 分钟检查根分区使用率，超过阈值发邮件告警。复用 task-notify 的 SMTP 配置——独立于 DooTask 主服务，避免 DooTask 故障时告警通道也失效。
+
+特性：
+- 防风暴：同一告警 4 小时内最多发一次
+- 邮件正文含 df 各分区 + Docker 占用 + 排查命令
+- 主题含 `SERVER_LABEL`（默认 hostname），多机器可区分
+- 数字与 `df -h` 一致（排除文件系统 root 保留块）
+- 告警路径**不跑递归 `du`**（磁盘满 + I/O 拥堵时会卡死）
+
+环境变量：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `THRESHOLD` | `85` | 告警阈值（百分比） |
+| `RECIPIENTS` | `ning.ding@uhomes.com` | 收件人（多个用 `,` 分隔） |
+| `SERVER_LABEL` | `os.uname().nodename` | 主题里的服务器标识 |
+
+部署：
+
+```bash
+# 1. 下载脚本
+sudo curl -fsSL https://raw.githubusercontent.com/yalding8/dootask/pro/ops/disk_alert.py \
+    -o /opt/task-notify/disk_alert.py
+sudo chmod +x /opt/task-notify/disk_alert.py
+
+# 2. 注册 cron
+echo "*/30 * * * * root SERVER_LABEL=<your-label> /opt/task-notify/venv/bin/python3 /opt/task-notify/disk_alert.py" \
+    | sudo tee /etc/cron.d/disk-alert
+sudo systemctl restart cron
+
+# 3. 测试触发（强制低阈值）
+sudo bash -c "SERVER_LABEL=test THRESHOLD=10 /opt/task-notify/venv/bin/python3 /opt/task-notify/disk_alert.py"
+```
+
+#### Docker 周清
+
+每周日 03:00 自动清理 Docker 构建缓存 + 悬挂镜像，避免磁盘累积满。
+
+```bash
+# 一次性安装（脚本 + cron）见 docs/INCIDENT_2026-04-15_DISK_FULL.md 附录
+ls /etc/cron.d/docker-cleanup
+```
+
+事故复盘见 [docs/INCIDENT_2026-04-15_DISK_FULL.md](../docs/INCIDENT_2026-04-15_DISK_FULL.md)。
 
 ---
 
