@@ -266,6 +266,21 @@
                             </li>
                         </ul>
                     </FormItem>
+                    <FormItem v-if="taskDetail.complete_at">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe6f0;</i>{{$L('完成信息')}}
+                        </div>
+                        <ul class="item-content">
+                            <li class="task-complete-info">
+                                <span class="complete-time">{{taskDetail.complete_at}}</span>
+                                <template v-if="taskDetail.complete_userid > 0">
+                                    <span class="complete-by">{{$L('完成人')}}：</span>
+                                    <UserAvatar :userid="taskDetail.complete_userid" :size="24" show-name clickOpenDetail/>
+                                </template>
+                                <span v-else class="complete-by-unknown">{{$L('完成人')}}：{{$L('系统自动')}}</span>
+                            </li>
+                        </ul>
+                    </FormItem>
                     <FormItem v-if="(taskDetail.loop && taskDetail.loop != 'never') || loopForce">
                         <div class="item-label" slot="label">
                             <i class="taskfont">&#xe93f;</i>{{$L('重复周期')}}

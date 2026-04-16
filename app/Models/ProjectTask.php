@@ -1242,6 +1242,7 @@ class ProjectTask extends AbstractModel
             $task->archived_userid = 0;
             $task->archived_follow = 0;
             $task->complete_at = null;
+            $task->complete_userid = 0;
             $task->created_at = Carbon::now();
             $task->save();
             // 复制任务内容
@@ -1349,6 +1350,7 @@ class ProjectTask extends AbstractModel
             // 重置完成状态
             if ($resetComplete) {
                 $newSubTask->complete_at = null;
+                $newSubTask->complete_userid = 0;
                 $newSubTask->flow_item_id = $startFlowItem?->id ?? 0;
                 $newSubTask->flow_item_name = self::formatFlowItemName($startFlowItem);
             }
@@ -1608,6 +1610,7 @@ class ProjectTask extends AbstractModel
                     return; // 本来就未完成
                 }
                 $this->complete_at = null;
+                $this->complete_userid = 0;
                 $this->addLog("标记{任务}未完成");
                 if ($addMsg) {
                     WebSocketDialogMsg::sendMsg(null, $this->dialog_id, 'notice', [
@@ -1643,6 +1646,7 @@ class ProjectTask extends AbstractModel
                     $complete_name = '已完成';
                 }
                 $this->complete_at = $complete_at;
+                $this->complete_userid = User::userid();
                 $this->addLog("标记{任务}{$complete_name}");
                 if ($addMsg) {
                     WebSocketDialogMsg::sendMsg(null, $this->dialog_id, 'notice', [

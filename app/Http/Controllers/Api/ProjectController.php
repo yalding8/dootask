@@ -2577,7 +2577,9 @@ class ProjectController extends AbstractController
             $permissionKey = ProjectPermission::TASK_UPDATE;
             if (Arr::exists($param, 'times')) {
                 $permissionKey = ProjectPermission::TASK_TIME;
-            } else if (Arr::exists($param, 'flow_item_id')) {
+            } else if (Arr::exists($param, 'flow_item_id') || Arr::exists($param, 'complete_at')) {
+                // uhomes 魔改：标记完成 (complete_at) 与移动流程 (flow_item_id) 走同一权限组，
+                // 避免 task_assist 越俎代庖替 owner 标记完成。详见 docs/DESIGN_2026-04-16_TASK_COMPLETE_PERMISSION_AND_OPERATOR.md
                 $permissionKey = ProjectPermission::TASK_STATUS;
             }
             ProjectPermission::userTaskPermission($project, $permissionKey, $task);
