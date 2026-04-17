@@ -16,7 +16,10 @@
  * 不在代码里硬编码内部业务名/邮箱/域名，避免公开 fork 暴露内部信息。
  */
 return [
-    // 项目名（DooTask 里必须已存在同名项目）
+    // 项目 ID（推荐，不受改名影响；为 0 时回退到 project_name 匹配）
+    'project_id' => (int) env('BD_REPORT_PROJECT_ID', 0),
+
+    // 项目名（仅当 project_id 为 0 时作为 fallback）
     'project_name' => env('BD_REPORT_PROJECT', ''),
 
     // 根部门 ID 列表（推荐用 ID 定位，因为部门名可能被改）

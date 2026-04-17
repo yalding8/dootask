@@ -43,10 +43,16 @@ class BdDailyReportRemind extends Command
             return 0;
         }
 
+        $projectId = (int) config('bd_daily_report.project_id', 0);
         $projectName = (string) config('bd_daily_report.project_name');
-        $project = Project::where('name', $projectName)->whereNull('archived_at')->first();
+        if ($projectId > 0) {
+            $project = Project::whereId($projectId)->whereNull('archived_at')->first();
+        } else {
+            $project = Project::where('name', $projectName)->whereNull('archived_at')->first();
+        }
         if (!$project) {
-            BdDailyReportNotifier::alert("项目 '{$projectName}' 不存在，催交跳过");
+            $hint = $projectId > 0 ? "ID={$projectId}" : "name='{$projectName}'";
+            BdDailyReportNotifier::alert("项目 {$hint} 不存在，催交跳过");
             return 1;
         }
 

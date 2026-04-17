@@ -51,11 +51,17 @@ class BdDailyReportCreate extends Command
             return 0;
         }
 
-        // 2. 查项目
+        // 2. 查项目（优先按 ID，回退按 name，避免改名导致匹配失败）
+        $projectId = (int) config('bd_daily_report.project_id', 0);
         $projectName = (string) config('bd_daily_report.project_name');
-        $project = Project::where('name', $projectName)->whereNull('archived_at')->first();
+        if ($projectId > 0) {
+            $project = Project::whereId($projectId)->whereNull('archived_at')->first();
+        } else {
+            $project = Project::where('name', $projectName)->whereNull('archived_at')->first();
+        }
         if (!$project) {
-            BdDailyReportNotifier::alert("项目 '{$projectName}' 不存在或已归档，请检查配置 BD_REPORT_PROJECT");
+            $hint = $projectId > 0 ? "ID={$projectId}" : "name='{$projectName}'";
+            BdDailyReportNotifier::alert("项目 {$hint} 不存在或已归档，请检查配置 BD_REPORT_PROJECT_ID / BD_REPORT_PROJECT");
             return 1;
         }
 

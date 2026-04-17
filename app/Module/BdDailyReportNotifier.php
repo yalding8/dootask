@@ -91,8 +91,9 @@ class BdDailyReportNotifier
     }
 
     /**
-     * 告警：推送到父任务负责人（韦刚）+ 所有系统管理员。
-     * 仅走站内消息，避免告警邮件对管理员邮箱形成风暴。
+     * 告警：推送到父任务负责人 + 所有系统管理员。
+     * 优先走站内消息（Swoole 上下文可用时），全部失败时降级走邮件。
+     * 解决 schedule timer 进程里 app('swoole') 不存在导致告警静默丢失的问题。
      */
     public static function alert(string $reason, ?int $parentOwnerUserid = null): void
     {
@@ -118,8 +119,25 @@ class BdDailyReportNotifier
 
         $targets = array_values(array_unique(array_merge($targets, $admins)));
 
+        // 先尝试站内消息，记录成功数
+        $dialogOk = 0;
         foreach ($targets as $uid) {
-            self::sendDialogMsg((int) $uid, '[BD日报] 自动化异常', $reason);
+            if (self::sendDialogMsg((int) $uid, '[BD日报] 自动化异常', $reason)) {
+                $dialogOk++;
+            }
+        }
+
+        // 站内消息全部失败（通常是 schedule timer 里 Swoole 不可用），降级走邮件
+        if ($dialogOk === 0 && !empty($targets)) {
+            Log::warning('[BdDailyReport] 站内消息全部失败，降级走邮件告警');
+            $subject = '[BD日报] 自动化异常';
+            $html = '<p>' . htmlspecialchars($reason, ENT_QUOTES) . '</p>';
+            foreach ($targets as $uid) {
+                $user = User::whereUserid($uid)->first();
+                if ($user) {
+                    self::sendEmail($user, $subject, $html);
+                }
+            }
         }
     }
 }
