@@ -70,8 +70,12 @@ services:
   redis:
     container_name: "dootask-redis-${APP_ID}"
     image: "redis:alpine"
+    # 挂载自定义 redis.conf (持久化策略见文件注释)
+    # 2026-04-17 RUNBOOK 件 3: 情况 B (session+queue), 启用 AOF everysec
+    command: ["redis-server", "/etc/redis/redis.conf"]
     volumes:
       - redis_data:/data
+      - ./docker/redis/redis.conf:/etc/redis/redis.conf:ro
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
