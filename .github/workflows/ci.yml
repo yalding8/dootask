@@ -1,0 +1,171 @@
+# Based on DooTask (AGPL-3.0). This file is licensed under AGPL-3.0.
+#
+# CI — 最小门卫（AGPL 合规 + manifest 一致性 + PHP 语法）
+#
+# 来源:
+#   - docs/DESIGN_2026-04-17_DEPLOYMENT_PIPELINE.md 第三层
+#   - INCIDENT-2026-04-16 #3（manifest 漏 commit 致全站白屏）
+#   - 全局 CLAUDE.md "CI/CD 设计原则"
+#
+# 设计取舍:
+#   - 只在 PR 触发, 不在 push to pro 重跑（PR 合并 = push to pro, 避免双触发）
+#   - 不跑 composer install / npm build（GitHub 私有仓库 3000 min/月预算, 留给关键检查）
+#   - 只检查"会上线伤生产"的快错: AGPL 缺头 / manifest 错位 / PHP 语法
+#   - concurrency 去重（连续 push 取消上一次 run）
+#
+# 注意:
+#   如果采用直接 push to pro 的工作流, 本 CI 不会触发——主动改用 PR 流程才能享受门卫。
+
+name: CI
+
+on:
+  pull_request:
+    branches: [pro]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: guard  # ← Branch Protection Required Status Check 名称（修改时须同步 gh api 配置）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要 base/head 比较
+
+      - name: Compute changed files
+        id: diff
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          echo "BASE=$BASE" >> "$GITHUB_ENV"
+          echo "HEAD=$HEAD" >> "$GITHUB_ENV"
+          git diff --name-only --diff-filter=AM "$BASE" "$HEAD" > /tmp/changed.txt
+          echo "changed file count: $(wc -l < /tmp/changed.txt)"
+          head -50 /tmp/changed.txt || true
+
+      # ───── 检查 1: 前端 build 产物与 manifest 一致性（防 INCIDENT-0416 #3）─────
+      - name: Check manifest.json consistency
+        run: |
+          set -e
+          CHANGED=/tmp/changed.txt
+          BUILD_CHANGED=0
+          MANIFEST_CHANGED=0
+
+          if grep -qE '^public/(js|css)/build/' "$CHANGED"; then
+            BUILD_CHANGED=1
+          fi
+          if grep -qE '^public/manifest\.json$' "$CHANGED"; then
+            MANIFEST_CHANGED=1
+          fi
+
+          if [ "$BUILD_CHANGED" = "1" ] && [ "$MANIFEST_CHANGED" = "0" ]; then
+            echo "::error::public/js/build 或 public/css/build 改动了，但 public/manifest.json 未更新。"
+            echo "::error::这正是 INCIDENT-2026-04-16 #3 的复发模式（线上白屏）。"
+            echo "::error::本地用 ./scripts/build-and-commit.sh 重新提交。"
+            exit 1
+          fi
+
+          # 校验 manifest 引用的文件都存在
+          if [ -f public/manifest.json ]; then
+            MISSING=0
+            while IFS= read -r ref; do
+              [ -n "$ref" ] || continue
+              if [ ! -f "public/$ref" ]; then
+                echo "::error::manifest.json 引用不存在的文件: $ref"
+                MISSING=$((MISSING + 1))
+              fi
+            done < <(grep -oE '"file"[[:space:]]*:[[:space:]]*"[^"]+"' public/manifest.json \
+                      | sed -E 's/.*"file"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
+                      | sort -u)
+            if [ "$MISSING" -gt 0 ]; then
+              echo "::error::manifest.json 与磁盘产物错位（缺 $MISSING 个文件，上线即 404）"
+              exit 1
+            fi
+          fi
+
+          echo "✓ manifest 一致性 OK"
+
+      # ───── 检查 2: 新增文件 AGPL 头注释（dootask/ AGPL-3.0 合规）─────
+      - name: Check AGPL headers on new files
+        run: |
+          set +e  # 允许 grep 不匹配
+          CHANGED=/tmp/changed.txt
+          MISSING_HEADER=()
+
+          # 只检查新增（A）的 PHP/JS/Vue/Bash 源码文件
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              *.php|*.js|*.vue|*.sh)
+                # vendor / node_modules / build 产物不检查
+                case "$f" in
+                  vendor/*|node_modules/*|public/js/build/*|public/css/build/*) continue ;;
+                esac
+                # 检查前 10 行是否含 AGPL 或 license 字样
+                if ! head -10 "$f" | grep -qiE 'agpl|gnu affero|license'; then
+                  MISSING_HEADER+=("$f")
+                fi
+                ;;
+            esac
+          done < <(git diff --name-only --diff-filter=A "$BASE" "$HEAD")
+
+          if [ ${#MISSING_HEADER[@]} -gt 0 ]; then
+            echo "::warning::以下新增文件缺少 AGPL/license 注释（建议补 'Based on DooTask (AGPL-3.0). This file is licensed under AGPL-3.0.'）："
+            for f in "${MISSING_HEADER[@]}"; do
+              echo "::warning file=$f::缺 AGPL header"
+            done
+            # warning 不 fail（避免误伤短脚本/配置）, 但留 PR 检查记录
+          fi
+
+          echo "✓ AGPL header 扫描完成（${#MISSING_HEADER[@]} 个 warning）"
+
+      # ───── 检查 3: 改动的 PHP 文件语法（php -l, 不需 composer install）─────
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.0'
+          tools: none
+          coverage: none
+
+      - name: PHP syntax check on changed files
+        run: |
+          set -e
+          ERRORS=0
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            case "$f" in *.php)
+              if ! php -l "$f" > /dev/null 2>&1; then
+                echo "::error file=$f::PHP 语法错误"
+                php -l "$f" || true
+                ERRORS=$((ERRORS + 1))
+              fi
+              ;;
+            esac
+          done < /tmp/changed.txt
+
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::error::$ERRORS 个 PHP 文件语法错误"
+            exit 1
+          fi
+          echo "✓ PHP 语法检查通过"
+
+      # ───── 检查 4: 改动 dootask/ 必须同步 DOOTASK_MODIFICATIONS.md ─────
+      # （umbrella 仓库的规则, 但 dootask fork 自己也强制以增加可追溯性）
+      - name: Check MODIFICATIONS.md updated
+        run: |
+          set +e
+          # 看是否有 dootask 实际代码变化（排除 .github、文档）
+          CODE_CHANGED=$(git diff --name-only "$BASE" "$HEAD" \
+            | grep -vE '^(\.github/|docs/|README|CHANGELOG|MODIFICATIONS\.md)' \
+            | head -1)
+
+          if [ -n "$CODE_CHANGED" ]; then
+            if ! git diff --name-only "$BASE" "$HEAD" | grep -q '^MODIFICATIONS\.md$'; then
+              echo "::warning::代码有改动但 MODIFICATIONS.md 未更新（AGPL 魔改清单需同步）"
+            fi
+          fi
+          echo "✓ MODIFICATIONS.md 检查完成"
