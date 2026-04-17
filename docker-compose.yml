@@ -35,6 +35,11 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # 固化 2026-04-17 发现的 runtime limit (之前 docker update 设的 2.5GB).
+    # 稳态 ~750MB, 含 BD 日报批处理峰值, 2.5GB 留 3x 余量.
+    mem_limit: 2560m
+    memswap_limit: 2560m
+    mem_reservation: 1g
 
   nginx:
     container_name: "dootask-nginx-${APP_ID}"
@@ -104,6 +109,10 @@ services:
     networks:
       - extnetwork
     restart: unless-stopped
+    # 固化 2026-04-17 runtime limit (1.5GB). 稳态 ~450MB, 留 3x 余量.
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    mem_reservation: 512m
 
   appstore:
     container_name: "dootask-appstore-${APP_ID}"
