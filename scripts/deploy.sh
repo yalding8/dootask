@@ -37,7 +37,11 @@ DEPLOY_DIR="${DEPLOY_DIR:-/opt/dootask}"
 FORK_REMOTE="${FORK_REMOTE:-fork}"
 FORK_BRANCH="${FORK_BRANCH:-pro}"
 PROD_URL="${PROD_URL:-https://task.critvo.com}"
+# 内部探测必须跟 301→HTTPS 跳转 (线上 nginx 强制 https).
+# 2026-04-17 RUNBOOK 件 1 实测: http://127.0.0.1/api/system/version 返回 301 而非 200.
+# -L 跟跳转, -k 接受自签证书 (127.0.0.1 证书不是给这个主机名签的).
 INTERNAL_URL="${INTERNAL_URL:-http://127.0.0.1}"
+INTERNAL_CURL_OPTS="${INTERNAL_CURL_OPTS:--sL -k}"
 DEPLOY_LOG="${DEPLOY_DIR}/DEPLOY_LOG.md"
 LOCK_FILE="${DEPLOY_DIR}/.deploy.lock"
 TAG_KEEP=30
@@ -104,8 +108,8 @@ smoke_check_once() {
   # 关闭 pipefail, 防止 grep 不匹配炸掉整脚本
   set +o pipefail
 
-  # 1) 内部 API
-  code=$(curl -s -o /dev/null -w '%{http_code}' "${INTERNAL_URL}/api/system/version" 2>/dev/null || echo "000")
+  # 1) 内部 API (-L 跟 301→https 跳转, 线上 nginx 配了 http 强制跳 https)
+  code=$(curl $INTERNAL_CURL_OPTS -o /dev/null -w '%{http_code}' "${INTERNAL_URL}/api/system/version" 2>/dev/null || echo "000")
   [ "$code" = "200" ] || { set -o pipefail; return 1; }
 
   # 2) 外部 API（经 SLB/CDN）
