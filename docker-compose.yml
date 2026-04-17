@@ -56,6 +56,11 @@ services:
     networks:
       - extnetwork
     restart: unless-stopped
+    # INCIDENT-2026-04-16 事故 1 教训: 主机 7GB 无 swap, OOM 会直接 kill 进程.
+    # 2026-04-17 实测 nginx 稳态 14MB, 设 256MB 留 18x 余量.
+    mem_limit: 256m
+    memswap_limit: 256m
+    mem_reservation: 64m
 
   redis:
     container_name: "dootask-redis-${APP_ID}"
@@ -70,6 +75,11 @@ services:
     networks:
       - extnetwork
     restart: unless-stopped
+    # 固化 2026-04-17 发现的 runtime limit (之前 docker update 设的 512MB,
+    # 没在 compose, 容器 recreate 会丢). 实测稳态 10MB, 512MB 留大幅余量.
+    mem_limit: 512m
+    memswap_limit: 512m
+    mem_reservation: 128m
 
   mariadb:
     container_name: "dootask-mariadb-${APP_ID}"
@@ -113,6 +123,11 @@ services:
     networks:
       - extnetwork
     restart: unless-stopped
+    # appstore 自己只是个 orchestrator (实测稳态 25MB), 512MB 应付启动插件短暂峰值.
+    # 注意: appstore 启动的 app-* 插件容器是独立 container, 不占此 budget.
+    mem_limit: 512m
+    memswap_limit: 512m
+    mem_reservation: 128m
 
 networks:
   extnetwork:
