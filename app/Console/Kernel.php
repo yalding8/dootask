@@ -40,6 +40,16 @@ class Kernel extends ConsoleKernel
             ->timezone($tz)
             ->withoutOverlapping(30)
             ->onOneServer();
+
+        // M2 KR1 测量: 每周一 00:01 快照 WAU, 自动判定 4 周连续达标
+        // 数据源: pre_users.line_at (最后在线时间, 30s 接口刷新)
+        // 不需要 middleware + 新表 (PRD §M2 简化方案)
+        $schedule->command('metrics:dau-report --snapshot')
+            ->weeklyOn(1, '00:01')
+            ->timezone($tz)
+            ->withoutOverlapping(10)
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/metrics-dau.log'));
     }
 
     /**
