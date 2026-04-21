@@ -85,7 +85,10 @@ export default {
             return this.$store.state.userInfo || {}
         },
         userDeptIds() {
-            return (this.userInfo.department || '').split(',').map(Number).filter(Boolean)
+            const dept = this.userInfo.department
+            if (!dept) return []
+            if (Array.isArray(dept)) return dept.map(Number).filter(Boolean)
+            return String(dept).split(',').map(Number).filter(Boolean)
         },
         projectId() {
             if (this.userDeptIds.some(d => STUDY_DEPT_IDS.includes(d))) return PROJECT_STUDY
