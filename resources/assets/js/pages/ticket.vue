@@ -56,7 +56,7 @@
                         提交人：{{ userInfo.nickname || '—' }}（{{ userInfo.email || '' }}）
                     </div>
 
-                    <Button type="primary" size="large" long :loading="submitting" @click="onSubmit">提交工单</Button>
+                    <Button type="primary" size="large" long :loading="submitting" @click="onSubmit" style="background-color:#FF5A5F;border-color:#FF5A5F;">提交工单</Button>
                 </div>
             </div>
         </div>
@@ -126,8 +126,10 @@ export default {
                 data: { project_id: this.projectId }
             })
             if (res && res.ret === 1) {
-                this.projectMembers = (res.data?.project_user || [])
-                    .filter(m => m.userid !== this.userInfo.userid)
+                const members = res.data?.project_user || []
+                this.projectMembers = members
+                    .filter(m => m.userid && m.userid !== this.userInfo.userid)
+                    .map(m => ({ userid: m.userid, nickname: m.nickname || m.email || String(m.userid) }))
             }
         },
         async onSubmit() {
