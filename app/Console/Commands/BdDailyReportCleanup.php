@@ -63,7 +63,6 @@ class BdDailyReportCleanup extends Command
         $this->info("[BD cleanup] 待归档 {$tasks->count()} 条主任务（cutoff={$cutoff}）" . ($dryRun ? ' [dry-run]' : ''));
 
         $archived = 0;
-        $failed   = 0;
         $now      = Carbon::now();
 
         foreach ($tasks as $task) {
@@ -71,17 +70,22 @@ class BdDailyReportCleanup extends Command
                 $this->line("  [dry-run] task#{$task->id} {$task->name}");
                 continue;
             }
-            try {
-                $task->archivedTask($now, true);
-                $archived++;
-            } catch (\Throwable $e) {
-                $this->warn("  task#{$task->id} 归档失败：{$e->getMessage()}");
-                $failed++;
-            }
+            // 直接写 DB，绕过 archivedTask() 里的 WebSocket push（CLI 无 Swoole 上下文）
+            $task->archived_at     = $now;
+            $task->archived_userid = 0;   // 0 表示系统自动
+            $task->archived_follow = 0;
+            $task->save();
+            // 级联归档子任务
+            ProjectTask::whereParentId($task->id)->update([
+                'archived_at'     => $now,
+                'archived_userid' => 0,
+                'archived_follow' => 0,
+            ]);
+            $archived++;
         }
 
         if (!$dryRun) {
-            $this->info("[BD cleanup] 完成：归档 {$archived} 条，失败 {$failed} 条");
+            $this->info("[BD cleanup] 完成：归档 {$archived} 条主任务（含子任务）");
         }
 
         return $failed > 0 ? 1 : 0;
