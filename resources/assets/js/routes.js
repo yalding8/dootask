@@ -179,6 +179,11 @@ export default [
         component: () => import('./pages/token.vue'),
     },
     {
+        name: 'ticket',
+        path: '/ticket',
+        component: () => import('./pages/ticket.vue'),
+    },
+    {
         name: 'login',
         path: '/login',
         component: () => import('./pages/login.vue'),
