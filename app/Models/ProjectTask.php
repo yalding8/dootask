@@ -1655,8 +1655,47 @@ class ProjectTask extends AbstractModel
                 }
             }
             $this->save();
+            // 子任务完成时，尝试自动完成主任务
+            if ($complete_at !== null && $this->parent_id > 0) {
+                $this->autoCompleteParentTask();
+            }
         });
         return true;
+    }
+
+    /**
+     * 子任务全部完成后，若主任务与所有子任务负责人相同，则自动完成主任务（单向，静默）
+     * Based on DooTask (AGPL-3.0). This file is licensed under AGPL-3.0.
+     */
+    private function autoCompleteParentTask()
+    {
+        $parent = self::find($this->parent_id);
+        if (!$parent || $parent->complete_at) {
+            return;
+        }
+        // 还有未完成的兄弟子任务
+        if (self::whereParentId($this->parent_id)->whereNull('complete_at')->exists()) {
+            return;
+        }
+        // 主任务负责人（唯一）
+        $parentOwnerIds = $parent->taskUser->where('owner', 1)->pluck('userid');
+        if ($parentOwnerIds->count() !== 1) {
+            return;
+        }
+        $parentOwnerId = $parentOwnerIds->first();
+        // 检查所有子任务负责人是否均为同一人
+        $allSubtasks = self::whereParentId($this->parent_id)->with('taskUser')->get();
+        foreach ($allSubtasks as $sub) {
+            $subOwnerIds = $sub->taskUser->where('owner', 1)->pluck('userid');
+            if ($subOwnerIds->count() !== 1 || $subOwnerIds->first() !== $parentOwnerId) {
+                return;
+            }
+        }
+        // 自动完成主任务
+        $parent->complete_at = Carbon::now();
+        $parent->complete_userid = $parentOwnerId;
+        $parent->addLog("标记{任务}已完成（子任务自动完成）");
+        $parent->save();
     }
 
     /**
