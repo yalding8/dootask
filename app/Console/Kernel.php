@@ -40,6 +40,11 @@ class Kernel extends ConsoleKernel
             ->timezone($tz)
             ->withoutOverlapping(30)
             ->onOneServer();
+        $schedule->command('bd-daily-report:cleanup --days=7')
+            ->weeklyOn(0, '23:00')
+            ->timezone($tz)
+            ->withoutOverlapping(30)
+            ->onOneServer();
 
         // M2 KR1 测量: 每周一 00:01 快照 WAU, 自动判定 4 周连续达标
         // 数据源: pre_users.line_at (最后在线时间, 30s 接口刷新)
