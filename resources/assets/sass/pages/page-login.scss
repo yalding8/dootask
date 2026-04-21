@@ -13,9 +13,9 @@
         overflow: auto;
         .login-logo {
             flex-shrink: 0;
-            width: 84px;
-            height: 84px;
-            background: url("../images/logo.svg") no-repeat center center;
+            width: 220px;
+            height: 53px;
+            background: url("../images/logo-uhomes.png") no-repeat center center;
             background-size: contain;
             &.can-click {
                 cursor: pointer;
@@ -29,7 +29,7 @@
             max-width: 90%;
             border-radius: 12px;
             background-color: #ffffff;
-            box-shadow: 0 0 10px #e6ecfa;
+            box-shadow: 0 4px 24px rgba(255, 90, 95, 0.12);
             overflow: hidden;
             .login-mode-switch {
                 position: absolute;
