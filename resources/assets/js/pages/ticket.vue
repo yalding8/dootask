@@ -125,12 +125,24 @@ export default {
                 url: "project/one",
                 data: { project_id: this.projectId }
             })
-            if (res && res.ret === 1) {
-                const members = res.data?.project_user || []
-                this.projectMembers = members
-                    .filter(m => m.userid && m.userid !== this.userInfo.userid)
-                    .map(m => ({ userid: m.userid, nickname: m.nickname || m.email || String(m.userid) }))
+            if (!res || res.ret !== 1) return
+            const projectUsers = (res.data?.project_user || [])
+                .filter(m => m.userid && m.userid !== this.userInfo.userid)
+            if (!projectUsers.length) return
+            const userIds = projectUsers.map(m => m.userid)
+            const basic = await this.$store.dispatch("call", {
+                url: "users/basic",
+                data: { userid: userIds },
+                checkAuth: false
+            })
+            const infoMap = {}
+            if (basic?.ret === 1 && Array.isArray(basic.data)) {
+                basic.data.forEach(u => { infoMap[u.userid] = u })
             }
+            this.projectMembers = userIds.map(uid => ({
+                userid: uid,
+                nickname: infoMap[uid]?.nickname || infoMap[uid]?.email || String(uid)
+            }))
         },
         async onSubmit() {
             if (!this.form.title.trim()) {
