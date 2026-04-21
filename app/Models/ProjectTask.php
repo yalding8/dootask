@@ -647,7 +647,8 @@ class ProjectTask extends AbstractModel
      */
     public function updateTask($data, &$updateMarking = [])
     {
-        //
+        // type 字段创建后不可修改（task/ticket 身份不变）
+        unset($data['type']);
         AbstractModel::transaction(function () use ($data, &$updateMarking) {
             // 主任务
             $mainTask = $this->parent_id > 0 ? self::find($this->parent_id) : null;
