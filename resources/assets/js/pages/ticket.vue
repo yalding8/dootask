@@ -3,6 +3,9 @@
     <div class="page-ticket">
         <PageTitle :title="$L('提交工单')"/>
         <div class="ticket-body">
+            <div class="ticket-nav">
+                <span class="ticket-back" @click="$router.go(-1)">← 返回</span>
+            </div>
             <div v-if="!projectId" class="ticket-no-perm">
                 <div class="ticket-no-perm-icon">⚠️</div>
                 <div class="ticket-no-perm-text">您所在部门暂无权限提交工单，请联系管理员。</div>
@@ -12,7 +15,10 @@
                 <div class="ticket-success-icon">✅</div>
                 <div class="ticket-success-title">工单提交成功</div>
                 <div class="ticket-success-sub">工单编号 #{{ submittedId }}，{{ teamName }}团队将尽快处理。</div>
-                <Button type="primary" @click="reset" style="margin-top:24px;">再提交一个</Button>
+                <div style="margin-top:24px;display:flex;gap:12px;justify-content:center;">
+                    <Button @click="$router.go(-1)">返回</Button>
+                    <Button type="primary" @click="reset" style="background-color:#FF5A5F;border-color:#FF5A5F;">再提交一个</Button>
+                </div>
             </div>
 
             <div v-else class="ticket-form-wrap">
@@ -217,6 +223,17 @@ export default {
     .ticket-body {
         width: 100%;
         max-width: 560px;
+    }
+
+    .ticket-nav {
+        margin-bottom: 12px;
+    }
+
+    .ticket-back {
+        font-size: 14px;
+        color: #909399;
+        cursor: pointer;
+        &:hover { color: #FF5A5F; }
     }
 
     .ticket-no-perm,
