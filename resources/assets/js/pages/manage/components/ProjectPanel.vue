@@ -35,6 +35,11 @@
                         <Icon class="menu-icon" type="md-add" />
                     </ETooltip>
                 </li>
+                <li v-if="[96,97].includes(projectId)" class="project-icon" @click="$router.push('/ticket')">
+                    <ETooltip :disabled="$isEEUIApp || windowTouch" content="提交工单">
+                        <Icon class="menu-icon" type="md-filing" />
+                    </ETooltip>
+                </li>
                 <li :class="['project-icon', searchText!='' ? 'active' : '']">
                     <Tooltip :always="searchText!=''" @on-popper-show="searchFocus" theme="light" :rawIndex="10">
                         <Icon class="menu-icon" type="ios-search" @click="searchFocus" />

@@ -36,8 +36,15 @@
                     </div>
 
                     <div class="ticket-field">
+                        <label class="ticket-label">期望处理人 <span class="opt">（选填）</span></label>
+                        <Select v-model="form.owner_userid" size="large" placeholder="不指定，由团队分配" clearable filterable>
+                            <Option v-for="m in projectMembers" :key="m.userid" :value="m.userid">{{ m.nickname }}</Option>
+                        </Select>
+                    </div>
+
+                    <div class="ticket-field">
                         <label class="ticket-label">期望完成时间 <span class="opt">（选填）</span></label>
-                        <DatePicker v-model="form.end_at" type="date" size="large" placeholder="如有紧急需求请选择日期" style="width:100%"/>
+                        <DatePicker v-model="form.end_at" type="datetime" size="large" placeholder="如有紧急需求请选择日期和时间" style="width:100%" format="yyyy-MM-dd HH:mm"/>
                     </div>
 
                     <div class="ticket-field">
@@ -70,12 +77,14 @@ export default {
             submitting: false,
             submitted: false,
             submittedId: null,
+            projectMembers: [],
             form: {
                 title: '',
                 category: '',
                 description: '',
                 end_at: '',
                 supplement: '',
+                owner_userid: null,
             },
             categories: ['咨询', '投诉', '操作申请', '技术问题', '其他'],
         }
@@ -104,9 +113,22 @@ export default {
     created() {
         if (!this.userInfo.userid) {
             this.$router.push('/login')
+            return
+        }
+        if (this.projectId) {
+            this.loadMembers()
         }
     },
     methods: {
+        async loadMembers() {
+            const res = await this.$store.dispatch("call", {
+                url: "project/users",
+                data: { project_id: this.projectId }
+            })
+            if (res && res.ret === 1) {
+                this.projectMembers = (res.data?.list || []).filter(m => m.userid !== this.userInfo.userid)
+            }
+        },
         async onSubmit() {
             if (!this.form.title.trim()) {
                 this.$Message.error('请填写工单标题')
@@ -135,11 +157,13 @@ export default {
                     ticket_category: this.form.category,
                     ticket_requestor_userid: this.userInfo.userid,
                 }
+                if (this.form.owner_userid) {
+                    data.owner = [this.form.owner_userid]
+                }
                 if (this.form.end_at) {
                     const d = new Date(this.form.end_at)
-                    data.end_at = d.getFullYear() + '-' +
-                        String(d.getMonth()+1).padStart(2,'0') + '-' +
-                        String(d.getDate()).padStart(2,'0') + ' 23:59:00'
+                    const pad = n => String(n).padStart(2, '0')
+                    data.end_at = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`
                 }
                 const res = await this.$store.dispatch("call", {
                     url: "project/task__add",

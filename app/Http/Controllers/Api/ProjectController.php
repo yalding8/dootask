@@ -2303,9 +2303,10 @@ class ProjectController extends AbstractController
         if (intval($data['type'] ?? 0) === 1 && config('features.ticket_enabled', false)) {
             $allowedDeptIds = array_map('intval', config('features.ticket_departments', []));
             if (!empty($allowedDeptIds)) {
-                $userDeptIds = array_filter(array_map('intval',
-                    explode(',', trim($user->department ?? '', ','))
-                ));
+                $deptRaw = is_array($user->department)
+                    ? $user->department
+                    : explode(',', trim($user->getAttributes()['department'] ?? '', ','));
+                $userDeptIds = array_filter(array_map('intval', $deptRaw));
                 // 递归检查用户是否属于允许部门（含父部门链）
                 $allowed = false;
                 foreach ($userDeptIds as $deptId) {
