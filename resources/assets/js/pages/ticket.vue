@@ -124,19 +124,18 @@ export default {
             const res = await this.$store.dispatch("call", {
                 url: "project/one",
                 data: { project_id: this.projectId }
-            })
-            if (!res || res.ret !== 1) return
-            const projectUsers = (res.data?.project_user || [])
+            }).catch(() => null)
+            if (!res?.data) return
+            const projectUsers = (res.data.project_user || [])
                 .filter(m => m.userid && m.userid !== this.userInfo.userid)
             if (!projectUsers.length) return
             const userIds = projectUsers.map(m => m.userid)
             const basic = await this.$store.dispatch("call", {
                 url: "users/basic",
                 data: { userid: userIds },
-                checkAuth: false
-            })
+            }).catch(() => null)
             const infoMap = {}
-            if (basic?.ret === 1 && Array.isArray(basic.data)) {
+            if (basic?.data && Array.isArray(basic.data)) {
                 basic.data.forEach(u => { infoMap[u.userid] = u })
             }
             this.projectMembers = userIds.map(uid => ({
@@ -184,8 +183,8 @@ export default {
                     url: "project/task__add",
                     data,
                 })
-                if (res && res.ret === 1) {
-                    this.submittedId = res.data?.info?.id || ''
+                if (res?.data) {
+                    this.submittedId = res.data?.info?.id || res.data?.id || ''
                     this.submitted = true
                 } else {
                     this.$Message.error(res?.msg || '提交失败，请重试')
