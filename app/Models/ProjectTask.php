@@ -741,10 +741,6 @@ class ProjectTask extends AbstractModel
             }
             // 状态
             if (Arr::exists($data, 'complete_at')) {
-                // 子任务：主任务已完成时无法修改
-                if ($mainTask?->complete_at) {
-                    throw new ApiException('主任务已完成，无法修改子任务状态');
-                }
                 if (Timer::isDate($data['complete_at'])) {
                     // 标记已完成
                     if ($this->complete_at) {
