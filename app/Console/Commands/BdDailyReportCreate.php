@@ -231,7 +231,7 @@ class BdDailyReportCreate extends Command
                         'p_name' => '',
                         'p_color' => '',
                         'sort' => $sort,
-                        'visibility' => 1,
+                        'visibility' => 2,
                     ]);
                     $task->save();
                     ProjectTaskUser::createInstance([
