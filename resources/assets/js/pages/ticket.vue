@@ -196,7 +196,8 @@ export default {
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    min-height: 100vh;
+    height: 100%;
+    overflow-y: auto;
     background: #f8f8f8;
     padding: 40px 16px;
 
