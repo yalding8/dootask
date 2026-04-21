@@ -1746,6 +1746,7 @@ class ProjectTask extends AbstractModel
                 'id' => $this->id,
                 'archived_at' => $this->archived_at,
                 'archived_userid' => $this->archived_userid,
+                'visibility' => $this->visibility,
             ]);
             // 更新对话时间
             if ($this->dialog_id > 0) {
