@@ -122,11 +122,12 @@ export default {
     methods: {
         async loadMembers() {
             const res = await this.$store.dispatch("call", {
-                url: "project/users",
+                url: "project/one",
                 data: { project_id: this.projectId }
             })
             if (res && res.ret === 1) {
-                this.projectMembers = (res.data?.list || []).filter(m => m.userid !== this.userInfo.userid)
+                this.projectMembers = (res.data?.project_user || [])
+                    .filter(m => m.userid !== this.userInfo.userid)
             }
         },
         async onSubmit() {

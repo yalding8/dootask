@@ -35,7 +35,7 @@
                         <Icon class="menu-icon" type="md-add" />
                     </ETooltip>
                 </li>
-                <li v-if="[96,97].includes(projectId)" class="project-icon" @click="$router.push('/ticket')">
+                <li v-if="[96,97].includes(Number(projectId))" class="project-icon" @click="$router.push('/ticket')">
                     <ETooltip :disabled="$isEEUIApp || windowTouch" content="提交工单">
                         <Icon class="menu-icon" type="md-filing" />
                     </ETooltip>
