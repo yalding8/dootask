@@ -2299,6 +2299,30 @@ class ProjectController extends AbstractController
         $data = Request::input();
         $project_id = intval($data['project_id']);
         $column_id = $data['column_id'];
+        // Ticket 访问控制：type=1 时检查部门白名单
+        if (intval($data['type'] ?? 0) === 1 && config('features.ticket_enabled', false)) {
+            $allowedDeptIds = array_map('intval', config('features.ticket_departments', []));
+            if (!empty($allowedDeptIds)) {
+                $userDeptIds = array_filter(array_map('intval',
+                    explode(',', trim($user->department ?? '', ','))
+                ));
+                // 递归检查用户是否属于允许部门（含父部门链）
+                $allowed = false;
+                foreach ($userDeptIds as $deptId) {
+                    $dept = \App\Models\UserDepartment::find($deptId);
+                    while ($dept) {
+                        if (in_array($dept->id, $allowedDeptIds)) {
+                            $allowed = true;
+                            break 2;
+                        }
+                        $dept = $dept->parent_id ? \App\Models\UserDepartment::find($dept->parent_id) : null;
+                    }
+                }
+                if (!$allowed) {
+                    throw new ApiException('暂无权限创建工单，请联系管理员');
+                }
+            }
+        }
         // 项目
         $project = Project::userProject($project_id);
         //
