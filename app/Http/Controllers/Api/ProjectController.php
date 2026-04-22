@@ -2381,10 +2381,21 @@ class ProjectController extends AbstractController
         $task->pushMsg('add', $data);
         $task->taskPush(null, 0);
 
+        // M5 修复 (2026-04-22 晚): ProjectTask::addTask 只手动 pick 了特定字段,
+        // 丢弃了 type / ticket_category / ticket_requestor_userid 等 M5 migration
+        // 加的工单字段. 前端传了但 DB 永远是默认值. 这里 addTask 之后手动补保存.
+        $inputData = Request::input();
+        $task_type = intval($inputData['type'] ?? 0);
+        if ($task_type === 1) {
+            $task->type = 1;
+            $task->ticket_category = trim((string)($inputData['ticket_category'] ?? ''));
+            $task->ticket_requestor_userid = intval($inputData['ticket_requestor_userid'] ?? $user->userid);
+            $task->save();
+        }
+
         // M6 Phase 1: 任务创建推送企微群机器人 (失败不阻塞业务)
         // 设计文档: docs/DESIGN_2026-04-22_M6_业务通知系统.md
-        // 注: 不限 type — DooTask 数据库实际所有 task 都是 type=0,
-        // "工单"是前端 UI 概念非 DB 字段; 由 wechat_webhook_departments 白名单兜底过滤
+        // 注: 不限 type 的白名单兜底 — 由 wechat_webhook_departments 过滤
         \App\Module\WechatBusinessNotifier::taskCreated($task, $user);
 
         return Base::retSuccess('添加成功', $data);
