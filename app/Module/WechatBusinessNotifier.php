@@ -90,7 +90,8 @@ class WechatBusinessNotifier
         }
 
         $lines[] = ''; // 空行分段
-        $lines[] = sprintf("🔗 https://task.uhomes.com/single/%d", $task->id);
+        // 显式 markdown 链接格式: 企微 PC/手机端都识别 [text](url) 为可点击
+        $lines[] = sprintf("[🔗 打开任务 #%d](https://task.uhomes.com/single/%d)", $task->id, $task->id);
 
         self::send($title, implode("\n", $lines));
     }
