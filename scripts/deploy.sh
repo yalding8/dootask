@@ -81,9 +81,16 @@ for arg in "$@"; do
 done
 TARGET_REF="${TARGET_REF:-${FORK_REMOTE}/${FORK_BRANCH}}"
 
+# 整段部署计时起点 (用于通知里展示耗时)
+SCRIPT_START_TS=$(date +%s)
+
 # ───── 工具函数 ─────
 log()  { echo "[deploy $(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 die()  { echo "[FATAL] $*" >&2; exit 1; }
+elapsed_str() {
+  local diff=$(( $(date +%s) - SCRIPT_START_TS ))
+  if [ $diff -lt 60 ]; then echo "${diff}s"; else echo "$((diff/60))m$((diff%60))s"; fi
+}
 
 # 推送企微通知; wecom_notify.sh 自身在未配置 URL 时静默退出, 这里再加 || true 兜底
 notify_wecom() {
@@ -391,25 +398,31 @@ short_before="${BEFORE:0:8}"
 short_after="${AFTER:0:8}"
 change_count=$(git log --oneline "$BEFORE..$AFTER" 2>/dev/null | wc -l | tr -d ' ')
 top_change=$(git log -1 --pretty='%s' "$AFTER" 2>/dev/null || echo "?")
+top_author=$(git log -1 --pretty='%an' "$AFTER" 2>/dev/null || echo "?")
+# 多 commit 时, 列出所有作者去重
+all_authors=$(git log "$BEFORE..$AFTER" --pretty='%an' 2>/dev/null | sort -u | paste -sd ',' -)
+[ -z "$all_authors" ] && all_authors="$top_author"
 
 if smoke_test "部署后"; then
-  log "✓ 部署完成: $BEFORE → $AFTER"
+  elapsed=$(elapsed_str)
+  log "✓ 部署完成: $BEFORE → $AFTER (${elapsed})"
   record_deploy "$BEFORE" "$AFTER" "$TARGET_REF" "成功"
   log "  回滚命令: sudo $0 --rollback"
   notify_wecom "✅ DooTask 部署成功" \
-    "**${short_before} → ${short_after}** (${change_count} 个 commit)\n> ${top_change}\n回滚: \`sudo $0 --rollback\`"
+    "\n**变更** ${top_change}\n**作者** ${all_authors}\n**SHA** \`${short_before}\` → \`${short_after}\` (${change_count} commit)\n**耗时** ${elapsed}\n**冒烟** API 200 + JS hash + 容器 healthy\n\n回滚: \`sudo $0 --rollback\`"
   exit 0
 else
   log "✗ 冒烟失败, 触发自动回滚..."
   record_deploy "$BEFORE" "$AFTER" "$TARGET_REF" "失败-自动回滚"
   rollback_to "$ROLLBACK_TAG"
+  elapsed=$(elapsed_str)
   if smoke_test "回滚后"; then
     notify_wecom "⚠️ DooTask 部署失败已自动回滚" \
-      "**${short_before} → ${short_after}** 部署后冒烟未通过, 已回滚到 \`${ROLLBACK_TAG}\` (冒烟通过)\n> ${top_change}\n请排查原因后重新部署"
+      "\n**变更** ${top_change}\n**作者** ${all_authors}\n**SHA** \`${short_before}\` → \`${short_after}\` (${change_count} commit)\n**耗时** ${elapsed} (含回滚)\n**回滚点** \`${ROLLBACK_TAG}\` (冒烟通过)\n\n请排查原因后重新部署"
     die "部署失败已回滚到 $ROLLBACK_TAG（冒烟通过）"
   else
     notify_wecom "🚨 DooTask 部署失败且回滚也异常 - 人工介入" \
-      "**${short_before} → ${short_after}** 部署失败, 回滚到 \`${ROLLBACK_TAG}\` 后冒烟仍异常.\n> ${top_change}\n**立即排查!**"
+      "\n**变更** ${top_change}\n**作者** ${all_authors}\n**SHA** \`${short_before}\` → \`${short_after}\` (${change_count} commit)\n**耗时** ${elapsed} (回滚后冒烟仍异常)\n**失败 tag** \`${ROLLBACK_TAG}\`\n\n@all 立即排查!"
     die "部署失败且回滚后仍异常！人工介入。失败 tag: $ROLLBACK_TAG"
   fi
 fi
