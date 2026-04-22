@@ -92,14 +92,35 @@ find_php_container() {
 }
 
 nginx_reload_all() {
+  # 来源: INCIDENT-2026-04-22 NGINX_INODE_DRIFT
+  # 背景: docker-compose.yml 里 nginx 配置是 bind-mount 单个文件
+  # (./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf).
+  # git reset --hard 会写新文件再 rename 替换, 宿主机 inode 改变,
+  # 但 docker bind-mount 仍绑定到旧 inode, 容器内永远看不到新内容.
+  # nginx -s reload 读的就是旧文件 -> 配置不生效, 静默失败.
+  # 修复: 检测到 inode 漂移时, docker restart 让 mount 重新绑定.
   local any=0
+  local host_inode container_inode
   while IFS= read -r c; do
     [ -n "$c" ] || continue
     any=1
-    log "  nginx -t ($c)"
-    docker exec "$c" nginx -t
-    log "  nginx -s reload ($c)"
-    docker exec "$c" nginx -s reload
+
+    host_inode=$(stat -c '%i' "$DEPLOY_DIR/docker/nginx/default.conf" 2>/dev/null || echo "0")
+    container_inode=$(docker exec "$c" stat -c '%i' /etc/nginx/conf.d/default.conf 2>/dev/null || echo "0")
+
+    if [ "$host_inode" != "0" ] && [ "$container_inode" != "0" ] && [ "$host_inode" != "$container_inode" ]; then
+      log "  ⚠ nginx 配置 inode 漂移 (容器=$container_inode, 宿主=$host_inode), 必须 docker restart ($c)"
+      docker restart "$c" >/dev/null
+      # 给 nginx 时间起来, 防止后续冒烟立即查到 502
+      sleep 5
+      log "  ✓ 容器已重启 ($c, 新 inode=$(docker exec "$c" stat -c '%i' /etc/nginx/conf.d/default.conf 2>/dev/null || echo '?'))"
+    else
+      log "  nginx 配置 inode 一致 ($container_inode), 走 reload ($c)"
+      log "  nginx -t ($c)"
+      docker exec "$c" nginx -t
+      log "  nginx -s reload ($c)"
+      docker exec "$c" nginx -s reload
+    fi
   done < <(find_nginx_containers)
   [ $any -eq 1 ] || log "WARN: 未找到 dootask-nginx-* 容器, 跳过 reload"
 }
