@@ -36,8 +36,8 @@ set -euo pipefail
 DEPLOY_DIR="${DEPLOY_DIR:-/opt/dootask}"
 FORK_REMOTE="${FORK_REMOTE:-fork}"
 FORK_BRANCH="${FORK_BRANCH:-pro}"
-PROD_URL="${PROD_URL:-https://task.critvo.com}"
-PROD_HOST="${PROD_HOST:-task.critvo.com}"
+PROD_URL="${PROD_URL:-https://task.uhomes.com}"
+PROD_HOST="${PROD_HOST:-task.uhomes.com}"
 # 内部探测必须跟 301→HTTPS 跳转 (线上 nginx 强制 https).
 # 2026-04-17 RUNBOOK 件 1 实测: http://127.0.0.1/api/system/version 返回 301 而非 200.
 # -L 跟跳转, -k 接受自签证书 (127.0.0.1 证书不是给这个主机名签的).
