@@ -74,6 +74,11 @@ class WechatBusinessNotifier
         $lines = [];
         $lines[] = sprintf("**标题**：%s", $task->name ?? '(无标题)');
 
+        $category = self::getCategory($task);
+        if ($category) {
+            $lines[] = sprintf("**分类**：%s", $category);
+        }
+
         $project_name = self::getProjectName($task);
         if ($project_name) {
             $lines[] = sprintf("**项目**：%s", $project_name);
@@ -82,18 +87,60 @@ class WechatBusinessNotifier
         $lines[] = sprintf("**提交人**：%s", $creator->nickname ?: '(未知)');
 
         $owners = self::getOwnersDisplay($task);
-        $lines[] = sprintf("**处理人**：%s", $owners ?: '未指派');
+        // 处理人加粗 (视觉 @, 企微 markdown 不支持真 mention)
+        $lines[] = sprintf("**处理人**：**%s**", $owners ?: '未指派');
 
         $deadline = self::formatDeadline($task);
         if ($deadline) {
             $lines[] = sprintf("**截止**：%s", $deadline);
         }
 
+        $desc_snippet = self::getDescSnippet($task);
+        if ($desc_snippet) {
+            $lines[] = sprintf("**描述**：%s", $desc_snippet);
+        }
+
         $lines[] = ''; // 空行分段
         // 显式 markdown 链接格式: 企微 PC/手机端都识别 [text](url) 为可点击
-        $lines[] = sprintf("[🔗 打开任务 #%d](https://task.uhomes.com/single/task/%d)", $task->id, $task->id);
+        $lines[] = sprintf("[🔗 打开工单 #%d](https://task.uhomes.com/single/task/%d)", $task->id, $task->id);
+
+        // CTA: 有处理人时提醒登录系统处理 (视觉 @, 提醒 owner 别漏)
+        if ($owners && $owners !== '未指派') {
+            $lines[] = '';
+            $lines[] = sprintf("> ⚠️ 请 **%s** 尽快登录 task.uhomes.com 处理并更新状态", $owners);
+        }
 
         self::send($title, implode("\n", $lines));
+    }
+
+    /** 拿工单分类 (M5 migration 加的 ticket_category 字段). */
+    private static function getCategory($task): string
+    {
+        try {
+            return trim((string)($task->ticket_category ?? ''));
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
+    /** 拿描述前 N 字符, 去 HTML + 压缩空白. */
+    private static function getDescSnippet($task, int $limit = 80): string
+    {
+        try {
+            $desc = $task->desc ?? '';
+            if (empty($desc)) {
+                return '';
+            }
+            $text = strip_tags($desc);
+            $text = preg_replace('/\s+/u', ' ', $text);
+            $text = trim($text);
+            if (mb_strlen($text) > $limit) {
+                $text = mb_substr($text, 0, $limit) . '…';
+            }
+            return $text;
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     /** 拿任务所在项目名, 失败返回空字符串. */
