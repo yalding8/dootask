@@ -17,6 +17,7 @@
 
 namespace App\Module;
 
+use App\Models\Project;
 use App\Models\ProjectTaskUser;
 use App\Models\User;
 use App\Models\UserDepartment;
@@ -69,15 +70,58 @@ class WechatBusinessNotifier
             return; // creator 不在允许的部门, 静默跳过
         }
         $title = '🆕 新任务';
+
+        $lines = [];
+        $lines[] = sprintf("**标题**：%s", $task->name ?? '(无标题)');
+
+        $project_name = self::getProjectName($task);
+        if ($project_name) {
+            $lines[] = sprintf("**项目**：%s", $project_name);
+        }
+
+        $lines[] = sprintf("**提交人**：%s", $creator->nickname ?: '(未知)');
+
         $owners = self::getOwnersDisplay($task);
-        $content = sprintf(
-            "**标题**：%s\n**提交人**：%s\n**当前处理人**：%s\n**链接**：https://task.uhomes.com/single/%d",
-            $task->name ?? '(无标题)',
-            $creator->nickname ?: '(未知)',
-            $owners ?: '未指派',
-            $task->id
-        );
-        self::send($title, $content);
+        $lines[] = sprintf("**处理人**：%s", $owners ?: '未指派');
+
+        $deadline = self::formatDeadline($task);
+        if ($deadline) {
+            $lines[] = sprintf("**截止**：%s", $deadline);
+        }
+
+        $lines[] = ''; // 空行分段
+        $lines[] = sprintf("🔗 https://task.uhomes.com/single/%d", $task->id);
+
+        self::send($title, implode("\n", $lines));
+    }
+
+    /** 拿任务所在项目名, 失败返回空字符串. */
+    private static function getProjectName($task): string
+    {
+        try {
+            if (empty($task->project_id)) {
+                return '';
+            }
+            $project = Project::find($task->project_id);
+            return $project ? (string)($project->name ?? '') : '';
+        } catch (\Throwable $e) {
+            Log::warning('[WechatBusinessNotifier] getProjectName failed', ['err' => $e->getMessage()]);
+            return '';
+        }
+    }
+
+    /** 格式化截止时间; 没截止 / 解析失败返回空. */
+    private static function formatDeadline($task): string
+    {
+        try {
+            if (empty($task->end_at)) {
+                return '';
+            }
+            $ts = is_string($task->end_at) ? strtotime($task->end_at) : ($task->end_at->timestamp ?? false);
+            return $ts ? date('Y-m-d H:i', $ts) : '';
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     /** @deprecated 用 taskCreated 替代; 保留是因为 DooTask type=1 在本部署中实际从未使用 */
