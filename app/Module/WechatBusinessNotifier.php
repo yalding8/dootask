@@ -19,6 +19,7 @@ namespace App\Module;
 
 use App\Models\ProjectTaskUser;
 use App\Models\User;
+use App\Models\UserDepartment;
 use Illuminate\Support\Facades\Log;
 
 class WechatBusinessNotifier
@@ -54,9 +55,15 @@ class WechatBusinessNotifier
 
     /**
      * E1: 工单创建 (type=1 task) 通知.
+     * 仅当 creator 属于 features.wechat_webhook_departments (含父部门链) 才推送.
+     * 部门白名单为空 = 不限部门.
      */
     public static function ticketCreated($task, User $creator): void
     {
+        $allowedDeptIds = array_map('intval', config('features.wechat_webhook_departments', []));
+        if (!self::isUserInDepartments($creator, $allowedDeptIds)) {
+            return; // creator 不在允许的部门, 静默跳过
+        }
         $title = '🆕 新工单';
         $owners = self::getOwnersDisplay($task);
         $content = sprintf(
@@ -67,6 +74,32 @@ class WechatBusinessNotifier
             $task->id
         );
         self::send($title, $content);
+    }
+
+    /**
+     * 检查 user 是否属于 allowedDeptIds (含父部门链).
+     * allowedDeptIds 为空数组 = 不限制 (所有用户视为通过).
+     * 复用 ProjectController::task__add 中 ticket 部门白名单的同款递归逻辑.
+     */
+    public static function isUserInDepartments(User $user, array $allowedDeptIds): bool
+    {
+        if (empty($allowedDeptIds)) {
+            return true; // 空白名单 = 不限部门
+        }
+        $deptRaw = is_array($user->department)
+            ? $user->department
+            : explode(',', trim($user->getAttributes()['department'] ?? '', ','));
+        $userDeptIds = array_filter(array_map('intval', $deptRaw));
+        foreach ($userDeptIds as $deptId) {
+            $dept = UserDepartment::find($deptId);
+            while ($dept) {
+                if (in_array($dept->id, $allowedDeptIds)) {
+                    return true;
+                }
+                $dept = $dept->parent_id ? UserDepartment::find($dept->parent_id) : null;
+            }
+        }
+        return false;
     }
 
     /** 单个 URL POST. 短超时 + 详细错误 log. */

@@ -52,4 +52,11 @@ return [
         array_map('trim', explode(',', env('FEATURE_WECHAT_WEBHOOK_URLS', '')))
     ),
 
+    // 企微通知部门白名单（与 ticket_departments 独立: 控制"哪些部门创建的事件要推 wecom")
+    // 空数组 = 不限部门 (所有部门都推); 非空 = 只有创建人属于这些部门 (含父部门链) 才推
+    // 2026-04-22 上线: FEATURE_WECHAT_WEBHOOK_DEPARTMENTS=1 (仅留学渠道部)
+    'wechat_webhook_departments' => array_filter(
+        array_map('intval', explode(',', env('FEATURE_WECHAT_WEBHOOK_DEPARTMENTS', '')))
+    ),
+
 ];
