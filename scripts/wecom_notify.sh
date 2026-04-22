@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Based on DooTask (AGPL-3.0). This file is licensed under AGPL-3.0.
 #
-# wecom_notify.sh — 推送企业微信群机器人通知
+# wecom_notify.sh — 推送企业微信群机器人通知 (deploy 事件用)
 #
 # 用法:
 #   ./wecom_notify.sh "标题" "Markdown 内容"
