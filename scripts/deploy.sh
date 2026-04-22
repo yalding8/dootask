@@ -91,38 +91,102 @@ find_php_container() {
   docker ps --format '{{.Names}}' | grep -E '^dootask-php-' | head -1
 }
 
-nginx_reload_all() {
-  # 来源: INCIDENT-2026-04-22 NGINX_INODE_DRIFT
-  # 背景: docker-compose.yml 里 nginx 配置是 bind-mount 单个文件
-  # (./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf).
-  # git reset --hard 会写新文件再 rename 替换, 宿主机 inode 改变,
-  # 但 docker bind-mount 仍绑定到旧 inode, 容器内永远看不到新内容.
-  # nginx -s reload 读的就是旧文件 -> 配置不生效, 静默失败.
-  # 修复: 检测到 inode 漂移时, docker restart 让 mount 重新绑定.
-  local any=0
+# 检测单个 bind-mount 文件的 inode 一致性
+# 返回: 0 = 一致 / 1 = 漂移 / 2 = 容器或文件不存在
+# 来源: INCIDENT-2026-04-22 NGINX_INODE_DRIFT + AUDIT-2026-04-22 (docker-compose 单文件 mount 全量审计)
+# 背景: docker bind-mount 单文件绑死 inode; git reset --hard 是 atomic write + rename, 宿主机 inode 改变;
+# 容器内 mount 仍指向旧 inode 的旧内容. reload/restart 进程级命令无效, 必须 docker restart 容器.
+check_mount_inode() {
+  local container="$1" host_path="$2" container_path="$3"
   local host_inode container_inode
-  while IFS= read -r c; do
-    [ -n "$c" ] || continue
-    any=1
+  host_inode=$(stat -c '%i' "$host_path" 2>/dev/null || echo "0")
+  container_inode=$(docker exec "$container" stat -c '%i' "$container_path" 2>/dev/null || echo "0")
+  [ "$host_inode" = "0" ] || [ "$container_inode" = "0" ] && return 2
+  [ "$host_inode" = "$container_inode" ] && return 0
+  log "  ⚠ inode 漂移: $container:$container_path (容器=$container_inode, 宿主=$host_inode)"
+  return 1
+}
 
-    host_inode=$(stat -c '%i' "$DEPLOY_DIR/docker/nginx/default.conf" 2>/dev/null || echo "0")
-    container_inode=$(docker exec "$c" stat -c '%i' /etc/nginx/conf.d/default.conf 2>/dev/null || echo "0")
-
-    if [ "$host_inode" != "0" ] && [ "$container_inode" != "0" ] && [ "$host_inode" != "$container_inode" ]; then
-      log "  ⚠ nginx 配置 inode 漂移 (容器=$container_inode, 宿主=$host_inode), 必须 docker restart ($c)"
-      docker restart "$c" >/dev/null
-      # 给 nginx 时间起来, 防止后续冒烟立即查到 502
-      sleep 5
-      log "  ✓ 容器已重启 ($c, 新 inode=$(docker exec "$c" stat -c '%i' /etc/nginx/conf.d/default.conf 2>/dev/null || echo '?'))"
-    else
-      log "  nginx 配置 inode 一致 ($container_inode), 走 reload ($c)"
-      log "  nginx -t ($c)"
-      docker exec "$c" nginx -t
-      log "  nginx -s reload ($c)"
-      docker exec "$c" nginx -s reload
+# 重启容器并等待回到 healthy (默认 30s 超时)
+restart_and_wait() {
+  local container="$1" timeout="${2:-30}"
+  log "  → docker restart $container (等 ${timeout}s 回 healthy)"
+  docker restart "$container" >/dev/null
+  local elapsed=0
+  while [ $elapsed -lt $timeout ]; do
+    local state
+    state=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || echo "missing")
+    if [ "$state" = "running" ]; then
+      # 有 healthcheck 的容器再等 healthy; 没 healthcheck 的容器 running 即可
+      local health
+      health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || echo "none")
+      if [ "$health" = "healthy" ] || [ "$health" = "none" ]; then
+        log "  ✓ $container 就绪 (status=$state, health=$health, elapsed=${elapsed}s)"
+        return 0
+      fi
     fi
-  done < <(find_nginx_containers)
-  [ $any -eq 1 ] || log "WARN: 未找到 dootask-nginx-* 容器, 跳过 reload"
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+  log "  ✗ $container 未在 ${timeout}s 内 healthy"
+  return 1
+}
+
+# 全量 inode 一致性保障 — 覆盖所有 bind-mount 单文件 (docker-compose.yml 审计 2026-04-22)
+# 漂移的容器去重后 docker restart, 一致的 nginx 容器走 nginx -s reload
+ensure_mount_inode_consistent() {
+  local nginx_container redis_container php_container
+  nginx_container=$(find_nginx_containers | head -1)
+  redis_container=$(docker ps --format '{{.Names}}' | grep -E '^dootask-redis-' | head -1)
+  php_container=$(find_php_container)
+
+  # 清单: container_var:host_path:container_path
+  # repassword.sh 是一次性脚本不缓存, 不在清单
+  local mounts=(
+    "$nginx_container:$DEPLOY_DIR/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf"
+    "$redis_container:$DEPLOY_DIR/docker/redis/redis.conf:/etc/redis/redis.conf"
+    "$php_container:$DEPLOY_DIR/docker/php/php.ini:/usr/local/etc/php/php.ini"
+    "$php_container:$DEPLOY_DIR/docker/php/php.conf:/etc/supervisor/conf.d/php.conf"
+    "$php_container:$DEPLOY_DIR/docker/crontab/crontab.conf:/etc/supervisor/conf.d/crontab.conf"
+  )
+
+  local need_restart=()
+  local nginx_inode_ok=1
+  local rc
+  for entry in "${mounts[@]}"; do
+    local container="${entry%%:*}"
+    local rest="${entry#*:}"
+    local host_path="${rest%%:*}"
+    local container_path="${rest#*:}"
+    [ -z "$container" ] && { log "  WARN: 未找到容器, 跳过 $host_path"; continue; }
+    # set -e 下不能让 check_mount_inode 直接 return 非 0 终止脚本; 用 || true 兜底再读 $?
+    check_mount_inode "$container" "$host_path" "$container_path" && rc=0 || rc=$?
+    if [ "$rc" = "1" ]; then
+      need_restart+=("$container")
+      [ "$container" = "$nginx_container" ] && nginx_inode_ok=0
+    fi
+  done
+
+  # 去重重启
+  if [ ${#need_restart[@]} -gt 0 ]; then
+    local unique
+    unique=$(printf "%s\n" "${need_restart[@]}" | sort -u)
+    while IFS= read -r c; do
+      restart_and_wait "$c" 30
+    done <<< "$unique"
+  fi
+
+  # nginx 一致 → 仍要 reload (清 keepalive 池, INCIDENT-2026-04-16 #2)
+  if [ $nginx_inode_ok -eq 1 ] && [ -n "$nginx_container" ]; then
+    log "  nginx inode 一致, 走 reload ($nginx_container)"
+    docker exec "$nginx_container" nginx -t
+    docker exec "$nginx_container" nginx -s reload
+  fi
+}
+
+# 兼容旧调用名 (deploy.sh 第 4 步还写的 nginx_reload_all)
+nginx_reload_all() {
+  ensure_mount_inode_consistent
 }
 
 # 单次冒烟检查（不轮询；返回 0=通过, 非 0=失败）
