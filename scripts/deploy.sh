@@ -43,7 +43,7 @@ PROD_HOST="${PROD_HOST:-task.uhomes.com}"
 # -L 跟跳转, -k 接受自签证书 (127.0.0.1 证书不是给这个主机名签的).
 # -H "Host: ..." 强制指定 server_name, 否则 nginx 不匹配 default server -> 404
 # (2026-04-18 INCIDENT: 缺 Host 导致 smoke 永远 404, deploy 永远触发自动 rollback)
-INTERNAL_URL="${INTERNAL_URL:-http://127.0.0.1}"
+INTERNAL_URL="${INTERNAL_URL:-http://127.0.0.1:2080}"
 INTERNAL_CURL_OPTS="${INTERNAL_CURL_OPTS:--sL -k -H Host:${PROD_HOST}}"
 DEPLOY_LOG="${DEPLOY_DIR}/DEPLOY_LOG.md"
 LOCK_FILE="${DEPLOY_DIR}/.deploy.lock"
