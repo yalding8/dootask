@@ -57,6 +57,16 @@ DRY_RUN=0
 ROLLBACK_MODE=0
 TARGET_REF=""
 
+# ───── 加载本地 .deploy.env (含 WECOM_BOT_WEBHOOK_URL 等敏感配置) ─────
+# 该文件不入 git, 由运维人工创建; 缺失则跳过推送相关功能.
+DEPLOY_ENV_FILE="${DEPLOY_DIR}/.deploy.env"
+if [ -f "$DEPLOY_ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$DEPLOY_ENV_FILE"
+  set +a
+fi
+
 # ───── 参数解析 ─────
 for arg in "$@"; do
   case "$arg" in
@@ -74,6 +84,14 @@ TARGET_REF="${TARGET_REF:-${FORK_REMOTE}/${FORK_BRANCH}}"
 # ───── 工具函数 ─────
 log()  { echo "[deploy $(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 die()  { echo "[FATAL] $*" >&2; exit 1; }
+
+# 推送企微通知; wecom_notify.sh 自身在未配置 URL 时静默退出, 这里再加 || true 兜底
+notify_wecom() {
+  local title="$1" content="$2"
+  if [ -x "${DEPLOY_DIR}/scripts/wecom_notify.sh" ]; then
+    "${DEPLOY_DIR}/scripts/wecom_notify.sh" "$title" "$content" || true
+  fi
+}
 
 # 并发保护 —— 第一个进程拿锁, 后来者立即退出
 acquire_lock() {
@@ -369,18 +387,29 @@ log "=== 4/5 重启 PHP + nginx reload ==="
 nginx_reload_all
 
 log "=== 5/5 冒烟验证 ==="
+short_before="${BEFORE:0:8}"
+short_after="${AFTER:0:8}"
+change_count=$(git log --oneline "$BEFORE..$AFTER" 2>/dev/null | wc -l | tr -d ' ')
+top_change=$(git log -1 --pretty='%s' "$AFTER" 2>/dev/null || echo "?")
+
 if smoke_test "部署后"; then
   log "✓ 部署完成: $BEFORE → $AFTER"
   record_deploy "$BEFORE" "$AFTER" "$TARGET_REF" "成功"
   log "  回滚命令: sudo $0 --rollback"
+  notify_wecom "✅ DooTask 部署成功" \
+    "**${short_before} → ${short_after}** (${change_count} 个 commit)\n> ${top_change}\n回滚: \`sudo $0 --rollback\`"
   exit 0
 else
   log "✗ 冒烟失败, 触发自动回滚..."
   record_deploy "$BEFORE" "$AFTER" "$TARGET_REF" "失败-自动回滚"
   rollback_to "$ROLLBACK_TAG"
   if smoke_test "回滚后"; then
+    notify_wecom "⚠️ DooTask 部署失败已自动回滚" \
+      "**${short_before} → ${short_after}** 部署后冒烟未通过, 已回滚到 \`${ROLLBACK_TAG}\` (冒烟通过)\n> ${top_change}\n请排查原因后重新部署"
     die "部署失败已回滚到 $ROLLBACK_TAG（冒烟通过）"
   else
+    notify_wecom "🚨 DooTask 部署失败且回滚也异常 - 人工介入" \
+      "**${short_before} → ${short_after}** 部署失败, 回滚到 \`${ROLLBACK_TAG}\` 后冒烟仍异常.\n> ${top_change}\n**立即排查!**"
     die "部署失败且回滚后仍异常！人工介入。失败 tag: $ROLLBACK_TAG"
   fi
 fi
