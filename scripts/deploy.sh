@@ -408,8 +408,8 @@ if smoke_test "部署后"; then
   log "✓ 部署完成: $BEFORE → $AFTER (${elapsed})"
   record_deploy "$BEFORE" "$AFTER" "$TARGET_REF" "成功"
   log "  回滚命令: sudo $0 --rollback"
-  notify_wecom "✅ DooTask 部署成功" \
-    "\n**变更** ${top_change}\n**作者** ${all_authors}\n**SHA** \`${short_before}\` → \`${short_after}\` (${change_count} commit)\n**耗时** ${elapsed}\n**冒烟** API 200 + JS hash + 容器 healthy\n\n回滚: \`sudo $0 --rollback\`"
+  notify_wecom "✅ task.uhomes.com 部署成功" \
+    "\n**变更**：${top_change}\n**作者**：${all_authors}\n**版本**：\`${short_before}\` → \`${short_after}\` （${change_count} 个提交）\n**耗时**：${elapsed}\n**冒烟**:接口正常 + 静态资源一致 + 容器健康\n\n回滚命令：\`sudo $0 --rollback\`"
   exit 0
 else
   log "✗ 冒烟失败, 触发自动回滚..."
@@ -417,12 +417,12 @@ else
   rollback_to "$ROLLBACK_TAG"
   elapsed=$(elapsed_str)
   if smoke_test "回滚后"; then
-    notify_wecom "⚠️ DooTask 部署失败已自动回滚" \
-      "\n**变更** ${top_change}\n**作者** ${all_authors}\n**SHA** \`${short_before}\` → \`${short_after}\` (${change_count} commit)\n**耗时** ${elapsed} (含回滚)\n**回滚点** \`${ROLLBACK_TAG}\` (冒烟通过)\n\n请排查原因后重新部署"
+    notify_wecom "⚠️ task.uhomes.com 部署失败已自动回滚" \
+      "\n**变更**：${top_change}\n**作者**：${all_authors}\n**版本**：\`${short_before}\` → \`${short_after}\` （${change_count} 个提交）\n**耗时**：${elapsed}（含回滚时间）\n**回滚点**：\`${ROLLBACK_TAG}\`（回滚后冒烟通过）\n\n请排查原因后重新部署"
     die "部署失败已回滚到 $ROLLBACK_TAG（冒烟通过）"
   else
-    notify_wecom "🚨 DooTask 部署失败且回滚也异常 - 人工介入" \
-      "\n**变更** ${top_change}\n**作者** ${all_authors}\n**SHA** \`${short_before}\` → \`${short_after}\` (${change_count} commit)\n**耗时** ${elapsed} (回滚后冒烟仍异常)\n**失败 tag** \`${ROLLBACK_TAG}\`\n\n@all 立即排查!"
+    notify_wecom "🚨 task.uhomes.com 部署失败且回滚也异常 - 人工介入" \
+      "\n**变更**：${top_change}\n**作者**：${all_authors}\n**版本**：\`${short_before}\` → \`${short_after}\` （${change_count} 个提交）\n**耗时**：${elapsed}（回滚后冒烟仍异常）\n**失败标签**：\`${ROLLBACK_TAG}\`\n\n<@all> 立即排查！"
     die "部署失败且回滚后仍异常！人工介入。失败 tag: $ROLLBACK_TAG"
   fi
 fi
