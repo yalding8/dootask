@@ -54,17 +54,21 @@ class WechatBusinessNotifier
     }
 
     /**
-     * E1: 工单创建 (type=1 task) 通知.
+     * E1: 任务创建通知.
      * 仅当 creator 属于 features.wechat_webhook_departments (含父部门链) 才推送.
      * 部门白名单为空 = 不限部门.
+     *
+     * 命名说明: 这个方法叫 taskCreated 而非 ticketCreated, 因为 DooTask 数据库
+     * 实际所有 task 都是 type=0, "工单"是 uhomes 前端 UI 的概念而非 DB 字段.
+     * 部门白名单 (DEPARTMENTS=1) 当前限定留学渠道部, 后续若刷屏可加 column/project 细分.
      */
-    public static function ticketCreated($task, User $creator): void
+    public static function taskCreated($task, User $creator): void
     {
         $allowedDeptIds = array_map('intval', config('features.wechat_webhook_departments', []));
         if (!self::isUserInDepartments($creator, $allowedDeptIds)) {
             return; // creator 不在允许的部门, 静默跳过
         }
-        $title = '🆕 新工单';
+        $title = '🆕 新任务';
         $owners = self::getOwnersDisplay($task);
         $content = sprintf(
             "**标题**：%s\n**提交人**：%s\n**当前处理人**：%s\n**链接**：https://task.uhomes.com/single/%d",
@@ -74,6 +78,12 @@ class WechatBusinessNotifier
             $task->id
         );
         self::send($title, $content);
+    }
+
+    /** @deprecated 用 taskCreated 替代; 保留是因为 DooTask type=1 在本部署中实际从未使用 */
+    public static function ticketCreated($task, User $creator): void
+    {
+        self::taskCreated($task, $creator);
     }
 
     /**

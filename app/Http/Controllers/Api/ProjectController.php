@@ -2381,11 +2381,11 @@ class ProjectController extends AbstractController
         $task->pushMsg('add', $data);
         $task->taskPush(null, 0);
 
-        // M6 Phase 1: 工单创建 (type=1) 推送企微群机器人 (失败不阻塞业务)
+        // M6 Phase 1: 任务创建推送企微群机器人 (失败不阻塞业务)
         // 设计文档: docs/DESIGN_2026-04-22_M6_业务通知系统.md
-        if (intval($task->type ?? 0) === 1) {
-            \App\Module\WechatBusinessNotifier::ticketCreated($task, $user);
-        }
+        // 注: 不限 type — DooTask 数据库实际所有 task 都是 type=0,
+        // "工单"是前端 UI 概念非 DB 字段; 由 wechat_webhook_departments 白名单兜底过滤
+        \App\Module\WechatBusinessNotifier::taskCreated($task, $user);
 
         return Base::retSuccess('添加成功', $data);
     }
