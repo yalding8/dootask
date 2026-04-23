@@ -65,4 +65,14 @@ return [
         'trim',
         explode(',', (string) env('BD_REPORT_SUBTASK_TITLES', ''))
     ))),
+
+    // ─────────────────────────────────────────────────────────
+    // 企微群三段推送开关 (设计: docs/DESIGN_2026-04-23_BD_WECOM_CHECKIN_NOTIFY.md)
+    // 注: 这里是运营策略开关 (可关闭已决定上线的推送), 不是产品能力灰度开关,
+    //     故不走 config/features.php 的 DHH ≤3 flag 红线.
+    // 另外还需要 features.wechat_webhook_enabled=true + features.wechat_webhook_urls 非空.
+    // ─────────────────────────────────────────────────────────
+    'wechat_morning_enabled' => (bool) env('BD_WECHAT_MORNING_ENABLED', true),
+    'wechat_checkin_enabled' => (bool) env('BD_WECHAT_CHECKIN_ENABLED', true),
+    'wechat_evening_enabled' => (bool) env('BD_WECHAT_EVENING_ENABLED', true),
 ];

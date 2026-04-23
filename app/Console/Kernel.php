@@ -46,6 +46,28 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping(30)
             ->onOneServer();
 
+        // BD 日报企微群三段推送 (设计: docs/DESIGN_2026-04-23_BD_WECOM_CHECKIN_NOTIFY.md)
+        // 每个命令内部有 feature flag + isWorkday + 0 任务 guard; 拆 3 个 flag 便于 9:30 单独关闭
+        // 注: morning 延后到 09:05, 给 create (09:00) 5 分钟建任务 buffer, 避免 race condition
+        $schedule->command('bd-daily-report:wechat-morning')
+            ->weekdays()
+            ->dailyAt('09:05')
+            ->timezone($tz)
+            ->withoutOverlapping(10)
+            ->onOneServer();
+        $schedule->command('bd-daily-report:wechat-checkin')
+            ->weekdays()
+            ->dailyAt('09:30')
+            ->timezone($tz)
+            ->withoutOverlapping(10)
+            ->onOneServer();
+        $schedule->command('bd-daily-report:wechat-evening')
+            ->weekdays()
+            ->dailyAt('19:00')
+            ->timezone($tz)
+            ->withoutOverlapping(10)
+            ->onOneServer();
+
         // M2 KR1 测量: 每周一 00:01 快照 WAU, 自动判定 4 周连续达标
         // 数据源: pre_users.line_at (最后在线时间, 30s 接口刷新)
         // 不需要 middleware + 新表 (PRD §M2 简化方案)
