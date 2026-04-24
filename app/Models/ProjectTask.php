@@ -1620,7 +1620,13 @@ class ProjectTask extends AbstractModel
                     return; // 本来就已完成
                 }
                 if ($this->parent_id == 0) {
-                    if (self::whereParentId($this->id)->whereCompleteAt(null)->exists()) {
+                    // BD 日报场景豁免: 子任务是每日固定 checklist 模板(如"租赁商机/新增合作方"),
+                    // 今天没勾选 = 今天没发生这类业务, 不是"未完成的工作".
+                    // 强制要求子任务全部完成会让主任务永远卡住, 阻碍 BD 打卡.
+                    // 详见: docs/FEEDBACK_2026-04-24_BD_TASK_SYSTEM.md §6 P0b
+                    $bdProjectId = (int) config('bd_daily_report.project_id', 0);
+                    $isBdDailyTask = $bdProjectId > 0 && (int) $this->project_id === $bdProjectId;
+                    if (!$isBdDailyTask && self::whereParentId($this->id)->whereCompleteAt(null)->exists()) {
                         throw new ApiException('子任务未完成', [
                             'task_id' => $this->id
                         ], -4004);
