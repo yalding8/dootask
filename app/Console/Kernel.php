@@ -68,6 +68,17 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping(10)
             ->onOneServer();
 
+        // BD 日报每日快照 (19:30, 给 evening push 后的"补完成" 留 30 分钟 buffer)
+        // 用途: P0b 修复效果验证 + P0a 团队看板历史数据基础
+        // 数据: storage/app/metrics/bd-daily-snapshots.jsonl (jsonl 追加)
+        $schedule->command('bd-daily-report:snapshot')
+            ->weekdays()
+            ->dailyAt('19:30')
+            ->timezone($tz)
+            ->withoutOverlapping(10)
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/bd-daily-snapshot.log'));
+
         // M2 KR1 测量: 每周一 00:01 快照 WAU, 自动判定 4 周连续达标
         // 数据源: pre_users.line_at (最后在线时间, 30s 接口刷新)
         // 不需要 middleware + 新表 (PRD §M2 简化方案)
