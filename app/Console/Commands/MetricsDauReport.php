@@ -2,15 +2,18 @@
 // Based on DooTask (AGPL-3.0). This file is licensed under AGPL-3.0.
 //
 // MetricsDauReport — 输出 DAU/WAU/MAU 活跃用户数, 支持 --snapshot 模式追加快照
-// 用于 M2 KR1 测量 (WAU ≥ 800 连续 4 周达标判定).
+// 用于 M2 KR1 测量 (WAU/总用户 ≥ 70% 连续 4 周达标判定).
 //
 // 设计取舍 (与 PRD §M2 DAUTracker 不同):
 //   - 不新建 middleware + 新表 — DooTask users 表已有 line_at (最后在线时间, 30s 接口刷新)
 //   - 仅读 users.line_at, 不引入 schema 变更
 //   - 快照写到 storage/app/metrics/wau-snapshots.jsonl (一行 JSON, 不需要新 schema)
-//   - KR1 阈值在脚本里硬编码 (800), 改阈值改源码即可
 //
-// 详见 docs/DESIGN_2026-04-18_dau_tracker.md (待补)
+// KR1 阈值历史:
+//   - 初版 WAU ≥ 800 绝对值 (PRD §M2 远期 1000 人规模目标).
+//   - 2026-05-01 改为 WAU/总用户 ≥ 70% 比率制 — 当前公司规模 77 人, 800 永远到不了,
+//     每天只会输出 "❌ 未达标" 伪信号. 改成比率后能反映真实产品健康度
+//     (B2B 内部协作工具行业基准 60-70%).
 
 namespace App\Console\Commands;
 
@@ -25,8 +28,8 @@ class MetricsDauReport extends Command
 
     protected $description = '输出 DAU/WAU/MAU 活跃用户数; --snapshot 模式追加快照供 KR1 判定';
 
-    /** M2 KR1 阈值: WAU ≥ 800 连续 4 周达标 */
-    const KR1_WAU_THRESHOLD = 800;
+    /** M2 KR1 阈值: WAU/总用户 ≥ 70% 连续 4 周达标 (2026-05-01 从绝对值 800 改为比率制) */
+    const KR1_WAU_RATIO_THRESHOLD = 0.70;
     const KR1_CONSECUTIVE_WEEKS = 4;
 
     public function handle()
@@ -75,24 +78,30 @@ class MetricsDauReport extends Command
         file_put_contents($file, json_encode($row, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
         $this->info("✓ 快照写入: {$file}");
 
-        // KR1 判定: 最近 N 周快照 WAU 是否全部 ≥ 阈值
+        // KR1 判定: 最近 N 周快照 wau/total 比率是否全部 ≥ 阈值
         $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         $recent = array_slice($lines, -self::KR1_CONSECUTIVE_WEEKS);
-        $waus = array_map(fn($s) => json_decode($s)->wau ?? 0, $recent);
+        $ratios = array_map(function ($s) {
+            $r = json_decode($s);
+            $t = $r->total ?? 0;
+            return $t > 0 ? ($r->wau ?? 0) / $t : 0;
+        }, $recent);
 
-        if (count($waus) < self::KR1_CONSECUTIVE_WEEKS) {
-            $this->line("KR1 判定: 快照仅 " . count($waus) . " 期, 不足 " . self::KR1_CONSECUTIVE_WEEKS . " 周, 暂不评判");
+        if (count($ratios) < self::KR1_CONSECUTIVE_WEEKS) {
+            $this->line("KR1 判定: 快照仅 " . count($ratios) . " 期, 不足 " . self::KR1_CONSECUTIVE_WEEKS . " 周, 暂不评判");
             return Command::SUCCESS;
         }
 
-        $allMet = count(array_filter($waus, fn($w) => $w >= self::KR1_WAU_THRESHOLD)) === count($waus);
-        $minW = min($waus);
-        $passRate = round($wau * 100 / self::KR1_WAU_THRESHOLD, 1);
+        $threshold = self::KR1_WAU_RATIO_THRESHOLD;
+        $allMet = count(array_filter($ratios, fn($r) => $r >= $threshold)) === count($ratios);
+        $minRatio = min($ratios);
+        $thresholdPct = round($threshold * 100, 0) . '%';
+        $pctList = implode(' / ', array_map(fn($r) => round($r * 100, 1) . '%', $ratios));
 
-        $this->line("最近 " . self::KR1_CONSECUTIVE_WEEKS . " 周 WAU: " . implode(' / ', $waus) . " (阈值 " . self::KR1_WAU_THRESHOLD . ")");
+        $this->line("最近 " . self::KR1_CONSECUTIVE_WEEKS . " 周 WAU 比率: $pctList (阈值 $thresholdPct)");
         $this->line($allMet
-            ? "KR1 判定: ✅ 达标 (4 周全部 ≥ " . self::KR1_WAU_THRESHOLD . ")"
-            : "KR1 判定: ❌ 未达标 (最低 " . $minW . ", 当前 WAU 达成率 {$passRate}%)");
+            ? "KR1 判定: ✅ 达标 (4 周全部 ≥ $thresholdPct)"
+            : "KR1 判定: ❌ 未达标 (最低 " . round($minRatio * 100, 1) . "%, 阈值 $thresholdPct)");
 
         return Command::SUCCESS;
     }

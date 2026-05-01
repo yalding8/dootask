@@ -60,6 +60,12 @@ New ops script (MIT license, not derivative of DooTask). Disk-usage monitoring: 
 1. Documented the BD daily report automation feature in the Fork modification section.
 2. Documented env vars required for deployment.
 
+### `app/Console/Commands/MetricsDauReport.php` (added prior, modified 2026-05-01)
+
+New Artisan command `metrics:dau-report [--snapshot]` for M2 KR1 measurement. Reads `users.line_at` to compute DAU/WAU/MAU; `--snapshot` appends to `storage/app/metrics/wau-snapshots.jsonl` and judges KR1 against the last 4 weekly snapshots.
+
+**2026-05-01**: Changed KR1 threshold from absolute `WAU ≥ 800` to ratio-based `WAU/total ≥ 70%`. The 800 figure was a remote 1000-user-scale target from PRD §M2; at current 77-user company size it can never be reached, so daily cron output was always "❌ 未达标 (达成率 7.6%)" — a false-negative signal. Ratio mode reflects real product health (B2B internal collab tools industry baseline 60-70%).
+
 ## Original Project
 
 - **Repository**: https://github.com/kuaifan/dootask
