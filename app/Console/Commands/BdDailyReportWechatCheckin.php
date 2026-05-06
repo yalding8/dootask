@@ -10,6 +10,7 @@
 namespace App\Console\Commands;
 
 use App\Module\BdDailyReportWechatHelper;
+use App\Module\BridgeClient;
 use App\Module\HolidayClient;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -74,6 +75,10 @@ MD;
         $tag = $dryRun ? '[DRY-RUN]' : ($ok ? '[sent]' : '[failed]');
         $this->info("[{$dateStr}] {$tag} checkin push, N={$n} unchecked={$m}");
         Log::info("[BdWechat][checkin] {$dateStr} {$tag} N={$n} unchecked={$m}");
+
+        if (!$dryRun) {
+            BridgeClient::notifyCheckin();
+        }
 
         return 0;
     }

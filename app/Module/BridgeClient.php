@@ -13,17 +13,17 @@ class BridgeClient
 {
     private static function baseUrl(): string
     {
-        return rtrim(config('app.feishu_bridge_url', 'http://127.0.0.1:3200'), '/');
+        return rtrim(env('FEISHU_BRIDGE_URL', 'http://127.0.0.1:3200'), '/');
     }
 
     private static function token(): string
     {
-        return (string) config('app.feishu_bridge_token', '');
+        return (string) env('FEISHU_BRIDGE_TOKEN', '');
     }
 
     private static function enabled(): bool
     {
-        return (bool) config('app.feishu_bridge_enabled', false);
+        return (bool) env('FEISHU_BRIDGE_ENABLED', false);
     }
 
     private static function post(string $path): bool

@@ -68,6 +68,14 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping(10)
             ->onOneServer();
 
+        // 飞书通知: 新分配任务（每 10 分钟）+ 即将逾期（每 30 分钟）
+        $schedule->command('bridge:notify-assigned')
+            ->everyTenMinutes()
+            ->withoutOverlapping(5);
+        $schedule->command('bridge:notify-overdue')
+            ->everyThirtyMinutes()
+            ->withoutOverlapping(10);
+
         // BD 日报每日快照 (19:30, 给 evening push 后的"补完成" 留 30 分钟 buffer)
         // 用途: P0b 修复效果验证 + P0a 团队看板历史数据基础
         // 数据: storage/app/metrics/bd-daily-snapshots.jsonl (jsonl 追加)

@@ -10,6 +10,7 @@
 namespace App\Console\Commands;
 
 use App\Module\BdDailyReportWechatHelper;
+use App\Module\BridgeClient;
 use App\Module\HolidayClient;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -74,6 +75,10 @@ MD;
         $tag = $dryRun ? '[DRY-RUN]' : ($ok ? '[sent]' : '[failed]');
         $this->info("[{$dateStr}] {$tag} evening push, N={$n} unfinished={$k}");
         Log::info("[BdWechat][evening] {$dateStr} {$tag} N={$n} unfinished={$k}");
+
+        if (!$dryRun) {
+            BridgeClient::notifyEvening();
+        }
 
         return 0;
     }
