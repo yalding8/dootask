@@ -17,6 +17,10 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 /**
+ * @deprecated 2026-05-08 — Kernel 18:00 调度已移除，由 feishu-bridge 18:00 互动晚卡接管
+ * （见 DESIGN_2026-05-08_BD_RITUAL_REVAMP.md）。文件保留可手动 `php artisan bd-daily-report:remind`
+ * 调用，作为飞书故障时的人工兜底通道。
+ *
  * 工作日 18:00 扫当日所有"{姓名} {日期} 日报"独立主任务（未完成），对负责人推送站内 + 邮件。
  */
 class BdDailyReportRemind extends Command

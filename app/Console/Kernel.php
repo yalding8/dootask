@@ -34,16 +34,28 @@ class Kernel extends ConsoleKernel
             ->timezone($tz)
             ->withoutOverlapping(30)
             ->onOneServer();
-        $schedule->command('bd-daily-report:remind')
+        // 18:00 站内 IM + 邮件文本催交于 2026-05-08 退役（DESIGN_2026-05-08_BD_RITUAL_REVAMP.md）
+        // 由 feishu-bridge 18:00 互动晚卡（review card）接管，下面 feishu-evening-review 触发。
+        // 历史调度: $schedule->command('bd-daily-report:remind')->weekdays()->dailyAt('18:00')->...
+        $schedule->command('bd-daily-report:feishu-evening-review')
             ->weekdays()
             ->dailyAt('18:00')
             ->timezone($tz)
-            ->withoutOverlapping(30)
+            ->withoutOverlapping(10)
             ->onOneServer();
         $schedule->command('bd-daily-report:cleanup --days=7')
             ->weeklyOn(0, '23:00')
             ->timezone($tz)
             ->withoutOverlapping(30)
+            ->onOneServer();
+        // 工作日 08:55 silent archive 前一日漏卡任务（next-morning archive，DESIGN_2026-05-08）
+        // 不发任何最后催交通知；归档仅设 archived_at，不改 complete_at（保留漏卡事实供 audit）
+        // 节假日（含调休）由命令内部 HolidayClient guard 跳过
+        $schedule->command('bd-daily-report:cleanup --include-incomplete')
+            ->weekdays()
+            ->dailyAt('08:55')
+            ->timezone($tz)
+            ->withoutOverlapping(10)
             ->onOneServer();
 
         // BD 日报企微群三段推送 (设计: docs/DESIGN_2026-04-23_BD_WECOM_CHECKIN_NOTIFY.md)

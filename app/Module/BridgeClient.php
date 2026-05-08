@@ -44,9 +44,10 @@ class BridgeClient
         }
     }
 
-    public static function notifyMorning(): bool  { return self::post('/internal/notify/morning'); }
-    public static function notifyCheckin(): bool  { return self::post('/internal/notify/checkin'); }
-    public static function notifyEvening(): bool  { return self::post('/internal/notify/evening'); }
-    public static function notifyAssigned(): bool { return self::post('/internal/notify/assigned'); }
-    public static function notifyOverdue(): bool  { return self::post('/internal/notify/overdue'); }
+    public static function notifyMorning(): bool        { return self::post('/internal/notify/morning'); }
+    public static function notifyCheckin(): bool        { return self::post('/internal/notify/checkin'); }
+    public static function notifyEvening(): bool        { return self::post('/internal/notify/evening'); }
+    public static function notifyEveningReview(): bool  { return self::post('/internal/notify/evening-review'); }
+    public static function notifyAssigned(): bool       { return self::post('/internal/notify/assigned'); }
+    public static function notifyOverdue(): bool        { return self::post('/internal/notify/overdue'); }
 }
