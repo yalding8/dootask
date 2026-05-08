@@ -60,9 +60,12 @@ class BdDailyReportCleanup extends Command
         $totalArchived = 0;
 
         // ─── 路径 1：归档已完成超过 N 天的任务 ───
+        // name 过滤：仅命中日报任务（命名 "{昵称} {YYYY-MM-DD} 日报"），防止误伤
+        // 同项目下手动建的非日报主任务（例 task#681/682 "行前会安排"）。
         $cutoff = $now->copy()->subDays($days)->endOfDay();
         $completedTasks = ProjectTask::where('project_id', $project->id)
             ->where('parent_id', 0)
+            ->where('name', 'like', '% 日报')
             ->whereNotNull('complete_at')
             ->where('complete_at', '<=', $cutoff)
             ->whereNull('archived_at')
@@ -88,6 +91,7 @@ class BdDailyReportCleanup extends Command
                 $todayStart = $now->copy()->startOfDay();
                 $incompleteTasks = ProjectTask::where('project_id', $project->id)
                     ->where('parent_id', 0)
+                    ->where('name', 'like', '% 日报')
                     ->whereNull('complete_at')
                     ->where('created_at', '<', $todayStart)
                     ->whereNull('archived_at')
