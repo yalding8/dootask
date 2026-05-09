@@ -23,6 +23,14 @@ class HolidayClient
      */
     public static function isOffDay(Carbon $date): array
     {
+        // 补班/手工触发的强制 override：放置 storage/app/.bd-force-workday-YYYY-MM-DD 文件即可。
+        // 文件名带日期 = 只对该日生效，避免忘记删除导致后续节假日被误判为工作日。
+        // 不依赖 env：./cmd artisan 走 docker exec 默认不透传宿主机 env。
+        $forceFile = storage_path('app/.bd-force-workday-' . $date->format('Y-m-d'));
+        if (file_exists($forceFile)) {
+            return ['is_off' => false, 'fallback_used' => false, 'reason' => 'force_workday_override'];
+        }
+
         $isWeekend = in_array($date->dayOfWeek, [Carbon::SATURDAY, Carbon::SUNDAY], true);
 
         $apiBase = rtrim((string) config('bd_daily_report.holiday_api'), '/');

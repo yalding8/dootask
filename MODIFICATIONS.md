@@ -35,9 +35,11 @@ This is a modified version of [DooTask](https://github.com/kuaifan/dootask), lic
 
 New configuration file for BD daily report automation. All sensitive defaults (project name, department name, owner email, internal domain) are intentionally left blank — production deployment must populate via `.env`.
 
-### `app/Module/HolidayClient.php` (added 2026-04-14)
+### `app/Module/HolidayClient.php` (added 2026-04-14, modified 2026-05-09)
 
 New module: HTTP client wrapper for `timor.tech` Chinese-holiday API with daily cache and weekend fallback.
+
+**2026-05-09**: Added per-date force-workday override. If `storage/app/.bd-force-workday-YYYY-MM-DD` exists, `isOffDay()` short-circuits to `is_off=false` for that exact date. Use case: 调休补班 (e.g. 五一后周六补班) when default policy "调休不汇报" needs a one-day exception. Date-scoped filename prevents leftover-file from accidentally overriding future holidays.
 
 ### `app/Module/BdDailyReportNotifier.php` (added 2026-04-14)
 
