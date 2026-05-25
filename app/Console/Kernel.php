@@ -88,6 +88,13 @@ class Kernel extends ConsoleKernel
             ->everyThirtyMinutes()
             ->withoutOverlapping(10);
 
+        // 飞书通知: 项目每日任务播报（次日 09:00 CST）
+        // 显式 Asia/Shanghai，避免容器 UTC 时区导致播报时刻/"昨日"窗口错位
+        $schedule->command('bridge:notify-project-digest')
+            ->dailyAt('09:00')
+            ->timezone('Asia/Shanghai')
+            ->withoutOverlapping(10);
+
         // BD 日报每日快照 (19:30, 给 evening push 后的"补完成" 留 30 分钟 buffer)
         // 用途: P0b 修复效果验证 + P0a 团队看板历史数据基础
         // 数据: storage/app/metrics/bd-daily-snapshots.jsonl (jsonl 追加)

@@ -50,4 +50,5 @@ class BridgeClient
     public static function notifyEveningReview(): bool  { return self::post('/internal/notify/evening-review'); }
     public static function notifyAssigned(): bool       { return self::post('/internal/notify/assigned'); }
     public static function notifyOverdue(): bool        { return self::post('/internal/notify/overdue'); }
+    public static function notifyProjectDigest(): bool  { return self::post('/internal/notify/project-digest'); }
 }
