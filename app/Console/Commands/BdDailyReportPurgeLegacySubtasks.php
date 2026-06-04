@@ -20,14 +20,19 @@ use Illuminate\Console\Command;
  *
  * 软删策略：设 deleted_at = now()，不物理删除——保留可回滚能力。
  *
+ * 注意：项目内还混有 BD 早期手写的真实工作子任务（如"行前会邀约*200"），
+ * 与模板 checklist 同为 parent_id != 0。清理时必须用 --titles 白名单限定
+ * 模板标题，避免误删用户内容（2026-06-04 dry-run 发现，详见 PR）。
+ *
  * 调用：
- *   php artisan bd-daily-report:purge-legacy-subtasks --dry-run
- *   php artisan bd-daily-report:purge-legacy-subtasks
+ *   php artisan bd-daily-report:purge-legacy-subtasks --titles="租赁商机,新增合作方" --dry-run
+ *   php artisan bd-daily-report:purge-legacy-subtasks --titles="租赁商机,新增合作方"
  */
 class BdDailyReportPurgeLegacySubtasks extends Command
 {
     protected $signature = 'bd-daily-report:purge-legacy-subtasks
-        {--dry-run : 仅打印待清理子任务，不落库}';
+        {--dry-run : 仅打印待清理子任务，不落库}
+        {--titles= : 逗号分隔的标题白名单，仅清理完全匹配的子任务；留空则清理全部（危险，会扫到用户手写子任务）}';
 
     protected $description = '[BD 日报] 一次性软删 BD 日报项目存量 checklist 子任务（plan-review 模型不再使用）';
 
@@ -49,11 +54,18 @@ class BdDailyReportPurgeLegacySubtasks extends Command
             return 1;
         }
 
-        // 拉所有"非主任务 + 未删除"的子任务
-        $subtasks = ProjectTask::where('project_id', $project->id)
+        // 拉所有"非主任务 + 未删除"的子任务；--titles 时仅匹配模板标题
+        $titles = array_values(array_filter(array_map('trim', explode(',', (string) $this->option('titles')))));
+        $query = ProjectTask::where('project_id', $project->id)
             ->where('parent_id', '!=', 0)
-            ->whereNull('deleted_at')
-            ->get();
+            ->whereNull('deleted_at');
+        if (!empty($titles)) {
+            $query->whereIn('name', $titles);
+            $this->info('[BD purge] 标题白名单：' . implode(' / ', $titles));
+        } else {
+            $this->warn('[BD purge] 未指定 --titles，将匹配项目内全部子任务（含用户手写内容），请确认这是有意为之');
+        }
+        $subtasks = $query->get();
 
         if ($subtasks->isEmpty()) {
             $this->info('[BD purge] 无待清理子任务（项目内已无 parent_id != 0 的活跃子任务）');
