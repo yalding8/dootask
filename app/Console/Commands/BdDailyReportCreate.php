@@ -34,6 +34,11 @@ class BdDailyReportCreate extends Command
 
     public function handle(): int
     {
+        if (!config('bd_daily_report.create_enabled', true)) {
+            $this->info('[BD create] BD_REPORT_CREATE_ENABLED=false，已停用每日任务创建，跳过');
+            return 0;
+        }
+
         $tz = config('bd_daily_report.timezone', 'Asia/Shanghai');
         $date = $this->option('date')
             ? Carbon::parse($this->option('date'), $tz)

@@ -16,6 +16,10 @@
  * 不在代码里硬编码内部业务名/邮箱/域名，避免公开 fork 暴露内部信息。
  */
 return [
+    // 每日任务创建总开关（2026-06-05 起支持整体停用 BD 日报任务系列；
+    // 停用时同时设 feishu-bridge FEISHU_BD_DAILY_ENABLED=false，否则 0 任务会推"0/0 🎉"空卡）
+    'create_enabled' => (bool) env('BD_REPORT_CREATE_ENABLED', true),
+
     // 项目 ID（推荐，不受改名影响；为 0 时回退到 project_name 匹配）
     'project_id' => (int) env('BD_REPORT_PROJECT_ID', 0),
 
