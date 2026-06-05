@@ -28,9 +28,10 @@ class Kernel extends ConsoleKernel
 
         // BD 日报自动化（基于 DooTask AGPL-3.0 的扩展，见 docs/DESIGN_2026-04-14_BD_DAILY_REPORT.md）
         $tz = config('bd_daily_report.timezone', 'Asia/Shanghai');
+        // 2026-06-05 Neil 决策: 早卡提前到 08:45 发, create 须先于发卡 (保持 5min buffer)
         $schedule->command('bd-daily-report:create')
             ->weekdays()
-            ->dailyAt('09:00')
+            ->dailyAt('08:40')
             ->timezone($tz)
             ->withoutOverlapping(30)
             ->onOneServer();

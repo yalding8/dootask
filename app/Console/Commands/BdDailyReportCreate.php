@@ -214,7 +214,7 @@ class BdDailyReportCreate extends Command
         }
 
         // 9. 逐人创建独立主任务（失败不中断其他人）
-        $startAt = $date->copy()->setTime(9, 0, 0);
+        $startAt = $date->copy()->setTime(8, 45, 0); // 2026-06-05 与早卡发卡时间对齐
         $endAt = $date->copy()->setTime(23, 59, 0);
         $creatorUserid = (int) $parentOwner->userid;
 
