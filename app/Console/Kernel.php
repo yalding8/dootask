@@ -61,22 +61,22 @@ class Kernel extends ConsoleKernel
 
         // BD 日报企微群三段推送 (设计: docs/DESIGN_2026-04-23_BD_WECOM_CHECKIN_NOTIFY.md)
         // 每个命令内部有 feature flag + isWorkday + 0 任务 guard; 拆 3 个 flag 便于 9:30 单独关闭
-        // 注: morning 延后到 09:05, 给 create (09:00) 5 分钟建任务 buffer, 避免 race condition
+        // 注: morning 在 create (08:40) 后 5 分钟, 保持建任务 buffer 避免 race condition (2026-06-05 整体提前)
         $schedule->command('bd-daily-report:wechat-morning')
             ->weekdays()
-            ->dailyAt('09:05')
+            ->dailyAt('08:45')
             ->timezone($tz)
             ->withoutOverlapping(10)
             ->onOneServer();
         $schedule->command('bd-daily-report:wechat-checkin')
             ->weekdays()
-            ->dailyAt('09:30')
+            ->dailyAt('09:15')
             ->timezone($tz)
             ->withoutOverlapping(10)
             ->onOneServer();
         $schedule->command('bd-daily-report:wechat-evening')
             ->weekdays()
-            ->dailyAt('19:00')
+            ->dailyAt('18:30')
             ->timezone($tz)
             ->withoutOverlapping(10)
             ->onOneServer();
