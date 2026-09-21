@@ -82,6 +82,24 @@ class FeishuOrgSyncServiceTest extends TestCase
         $this->assertSame(0, DB::table('feishu_org_sync_batches')->count());
     }
 
+    public function test_apply_rejects_an_owner_who_became_disabled_after_plan_generation(): void
+    {
+        $this->seedOrganization();
+        DB::table('users')->where('userid', 81)->update(['disable_at' => now()]);
+        $before = $this->writeCounts();
+        $plan = $this->plan();
+
+        try {
+            (new OrgSyncService())->apply($plan, $plan->digest());
+            $this->fail('Expected owner validation failure.');
+        } catch (ApiException $e) {
+            $this->assertSame('组织计划负责人状态无效', $e->getMessage());
+        }
+
+        $this->assertSame($before, $this->writeCounts());
+        $this->assertSame(0, DB::table('feishu_org_sync_batches')->count());
+    }
+
     /**
      * @dataProvider failureStages
      */

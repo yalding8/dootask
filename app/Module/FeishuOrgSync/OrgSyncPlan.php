@@ -21,7 +21,11 @@ final class OrgSyncPlan
 
     public static function fromJson(string $json, DateTimeImmutable $now): self
     {
-        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        try {
+            $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new ApiException('组织计划 JSON 无效');
+        }
         self::requireKeys($data, [
             'schemaVersion', 'generatedAt', 'expiresAt', 'sourceRoot', 'targetRoot',
             'departments', 'members', 'findings', 'digest',
@@ -104,7 +108,11 @@ final class OrgSyncPlan
             if (count($path) > 4) throw new ApiException('组织计划部门层级超限');
         }
         if (!isset($byId[self::SOURCE_ROOT]) || !array_key_exists('parentSourceId', $byId[self::SOURCE_ROOT])
-            || $byId[self::SOURCE_ROOT]['parentSourceId'] !== null) throw new ApiException('组织计划根部门无效');
+            || $byId[self::SOURCE_ROOT]['parentSourceId'] !== null
+            || $byId[self::SOURCE_ROOT]['action'] !== 'update'
+            || $byId[self::SOURCE_ROOT]['targetId'] !== self::TARGET_ROOT) {
+            throw new ApiException('组织计划根部门无效');
+        }
     }
 
     private static function validateMembers($members, array $departments): void

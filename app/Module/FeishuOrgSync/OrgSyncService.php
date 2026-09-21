@@ -199,6 +199,14 @@ final class OrgSyncService
 
     private function verifyPreconditions(OrgSyncPlan $plan): array
     {
+        $ownerIds = $this->sortedIds(array_column($plan->departments(), 'ownerUserId'));
+        $owners = DB::table('users')->whereIn('userid', $ownerIds)->lockForUpdate()->get()->keyBy('userid');
+        foreach ($ownerIds as $ownerId) {
+            $owner = $owners->get($ownerId);
+            if (!$owner || (int) $owner->bot !== 0 || $owner->disable_at !== null) {
+                throw new ApiException('组织计划负责人状态无效');
+            }
+        }
         $resolved = [];
         foreach ($plan->departments() as $department) {
             if ($department['action'] === 'create') {
