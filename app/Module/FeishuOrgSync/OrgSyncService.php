@@ -173,6 +173,33 @@ final class OrgSyncService
         }
     }
 
+    public function previewRestore(int $batchId): array
+    {
+        return DB::transaction(function () use ($batchId) {
+            $batch = FeishuOrgSyncBatch::where('id', $batchId)->lockForUpdate()->first();
+            if (!$batch || $batch->status !== FeishuOrgSyncBatch::STATUS_APPLIED) {
+                throw new ApiException('组织同步批次不可恢复');
+            }
+            $pre = json_decode((string) $batch->pre_snapshot, true, 512, JSON_THROW_ON_ERROR);
+            $post = json_decode((string) $batch->post_snapshot, true, 512, JSON_THROW_ON_ERROR);
+            if ($this->snapshotFromTemplate($post, (string) $batch->source_root) !== $post) {
+                throw new ApiException('组织恢复状态冲突');
+            }
+            foreach ($pre['departments'] as $sourceId => $department) {
+                if ($department === null) {
+                    $dialogId = (int) $post['departments'][$sourceId]['dialog'];
+                    if (DB::table('web_socket_dialog_msgs')->where('dialog_id', $dialogId)->exists()) {
+                        throw new ApiException('组织恢复新群已被使用');
+                    }
+                }
+            }
+            return [
+                'postDigest' => hash('sha256', (string) $batch->post_snapshot),
+                'counters' => $batch->countersArray(),
+            ];
+        }, 1);
+    }
+
     private function verifyPreconditions(OrgSyncPlan $plan): array
     {
         $resolved = [];
