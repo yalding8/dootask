@@ -41,26 +41,32 @@
                             <p><strong>{{$L('部门负责人')}}</strong></p>
                         </UserAvatarTip>
                         <div class="department-title">{{item.name}}</div>
+                        <Icon
+                            v-if="item.managed_source"
+                            type="md-lock"
+                            class="department-managed"
+                            :title="$L('由飞书组织同步管理')"/>
                         <EDropdown
+                            v-if="!item.managed_source || item.dialog_id"
                             size="medium"
                             trigger="click"
                             @visible-change="onVcDepartment($event, item.id)"
                             @command="onOpDepartment">
                             <i @click.stop="" class="taskfont department-menu">&#xe6e9;</i>
                             <EDropdownMenu slot="dropdown">
-                                <EDropdownItem v-if="item.level <= 3" :command="`add_${item.id}`">
+                                <EDropdownItem v-if="!item.managed_source && item.level <= 3" :command="`add_${item.id}`">
                                     <div>{{$L('添加子部门')}}</div>
                                 </EDropdownItem>
                                 <EDropdownItem v-if="item.dialog_id" :command="`dialog_${item.dialog_id}`">
                                     <div>{{$L('部门交流群')}}</div>
                                 </EDropdownItem>
-                                <EDropdownItem :command="`sync_${item.id}`">
+                                <EDropdownItem v-if="!item.managed_source" :command="`sync_${item.id}`">
                                     <div>{{$L('同步部门成员')}}</div>
                                 </EDropdownItem>
-                                <EDropdownItem :command="`edit_${item.id}`">
+                                <EDropdownItem v-if="!item.managed_source" :command="`edit_${item.id}`">
                                     <div>{{$L('编辑')}}</div>
                                 </EDropdownItem>
-                                <EDropdownItem :command="`del_${item.id}`">
+                                <EDropdownItem v-if="!item.managed_source" :command="`del_${item.id}`">
                                     <div style="color:#f00">{{$L('删除')}}</div>
                                 </EDropdownItem>
                             </EDropdownMenu>
@@ -198,7 +204,7 @@
                         </Option>
                         <Option
                             v-for="(item, index) in departmentList"
-                            :disabled="item.level > 3 || item.id == departmentData.id || (item.parent_id == departmentData.id && departmentData.id > 0)"
+                            :disabled="!!item.managed_source || item.level > 3 || item.id == departmentData.id || (item.parent_id == departmentData.id && departmentData.id > 0)"
                             :value="item.id"
                             :key="index"
                             :label="item.chains.join(' - ')">
@@ -1073,6 +1079,12 @@ export default {
         },
 
         onOpDepartment(val) {
+            const operationId = parseInt(val.replace(/^[a-z]+_/, ''))
+            const operationItem = this.departmentList.find(({id}) => id === operationId)
+            if (operationItem && operationItem.managed_source && !$A.leftExists(val, 'dialog_')) {
+                $A.modalWarning(this.$L('由飞书组织同步管理'))
+                return
+            }
             if ($A.leftExists(val, 'add_')) {
                 this.onShowDepartment({
                     parent_id: parseInt(val.substr(4))

@@ -165,6 +165,21 @@ class FeishuOrgSyncServiceTest extends TestCase
         $this->assertSame(0, DB::table('feishu_org_department_mappings')->count());
     }
 
+    public function test_restore_forgets_the_cache_for_a_deleted_created_department(): void
+    {
+        $this->seedOrganization();
+        $service = new OrgSyncService();
+        $plan = $this->plan();
+        $batch = $service->apply($plan, $plan->digest());
+        $childId = (int) DB::table('feishu_org_department_mappings')
+            ->where('source_department_id', 'od-child')->value('dootask_department_id');
+        Cache::forever('department_info_' . $childId, 'stale-created-department');
+
+        $service->restore($batch->id, hash('sha256', $batch->post_snapshot));
+
+        $this->assertNull(Cache::get('department_info_' . $childId));
+    }
+
     public function test_restore_refuses_current_state_drift_without_writes(): void
     {
         $this->seedOrganization();

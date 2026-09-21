@@ -121,11 +121,7 @@ final class OrgSyncService
                 return $batch;
             }, 1);
             Cache::forever('UserDepartment::rand', bin2hex(random_bytes(16)));
-            foreach ($plan->departments() as $department) {
-                if (isset($department['targetId'])) {
-                    Cache::forget('department_info_' . $department['targetId']);
-                }
-            }
+            $this->forgetDepartmentCaches((string) $batch->post_snapshot);
             return $batch;
         } finally {
             DB::selectOne('SELECT RELEASE_LOCK(?) AS released', [self::LOCK_NAME]);
@@ -167,6 +163,7 @@ final class OrgSyncService
                 return $batch;
             }, 1);
             Cache::forever('UserDepartment::rand', bin2hex(random_bytes(16)));
+            $this->forgetDepartmentCaches((string) $batch->post_snapshot);
             return $batch;
         } finally {
             DB::selectOne('SELECT RELEASE_LOCK(?) AS released', [self::LOCK_NAME]);
@@ -484,6 +481,16 @@ final class OrgSyncService
     {
         if ($this->faultInjector) {
             ($this->faultInjector)($stage);
+        }
+    }
+
+    private function forgetDepartmentCaches(string $snapshotJson): void
+    {
+        $snapshot = json_decode($snapshotJson, true);
+        foreach (($snapshot['departments'] ?? []) as $department) {
+            if (isset($department['id'])) {
+                Cache::forget('department_info_' . (int) $department['id']);
+            }
         }
     }
 
