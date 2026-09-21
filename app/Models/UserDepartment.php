@@ -43,7 +43,12 @@ class UserDepartment extends AbstractModel
     {
         $parents = [];
         $parent = $this;
+        $visited = [];
         while ($parent) {
+            if (isset($visited[$parent->id])) {
+                throw new ApiException('部门层级关系异常');
+            }
+            $visited[$parent->id] = true;
             $parents[] = $parent;
             $parent = $parent->parent_id ? self::find($parent->parent_id) : null;
         }

@@ -109,6 +109,9 @@
                     &.level-4 {
                         margin-left: 54px;
                     }
+                    &.level-5 {
+                        margin-left: 72px;
+                    }
                     .department-icon {
                         padding: 8px;
                         font-size: 16px;
@@ -119,6 +122,11 @@
                         overflow: hidden;
                         text-overflow: ellipsis;
                         white-space: nowrap;
+                    }
+                    .department-managed {
+                        color: #909399;
+                        flex-shrink: 0;
+                        padding: 10px 4px;
                     }
                     .department-menu {
                         display: inline-block;

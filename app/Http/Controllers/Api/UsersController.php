@@ -27,6 +27,7 @@ use App\Models\AbstractModel;
 use App\Models\UserCheckinFace;
 use App\Models\UserCheckinMac;
 use App\Models\UserDepartment;
+use App\Models\FeishuOrgDepartmentMapping;
 use App\Models\WebSocketDialog;
 use App\Models\UserCheckinRecord;
 use App\Models\WebSocketDialogMsg;
@@ -1171,6 +1172,14 @@ class UsersController extends AbstractController
                         return Base::retError('修改部门不存在');
                     }
                 }
+                $requestedDepartments = array_values(array_unique(array_map('intval', $data['department'])));
+                $changedDepartments = array_values(array_unique(array_merge(
+                    array_diff($userInfo->department, $requestedDepartments),
+                    array_diff($requestedDepartments, $userInfo->department)
+                )));
+                if ($changedDepartments && FeishuOrgDepartmentMapping::whereIn('dootask_department_id', $changedDepartments)->exists()) {
+                    return Base::retError('该部门由飞书组织同步管理');
+                }
                 $upArray['department'] = $data['department'];
                 break;
 
@@ -2055,8 +2064,12 @@ class UsersController extends AbstractController
     public function department__list()
     {
         User::auth('admin');
-        //
-        return Base::retSuccess('success', UserDepartment::orderBy('id')->get());
+        $managed = FeishuOrgDepartmentMapping::pluck('source_department_id', 'dootask_department_id');
+        $list = UserDepartment::orderBy('id')->get();
+        foreach ($list as $department) {
+            $department->managed_source = $managed->get($department->id);
+        }
+        return Base::retSuccess('success', $list);
     }
 
     /**
@@ -2106,6 +2119,9 @@ class UsersController extends AbstractController
             if (empty($userDepartment)) {
                 return Base::retError('部门不存在或已被删除');
             }
+            if (FeishuOrgDepartmentMapping::whereDootaskDepartmentId($id)->exists()) {
+                return Base::retError('该部门由飞书组织同步管理');
+            }
         } else {
             if (UserDepartment::count() > 200) {
                 return Base::retError('最多只能创建200个部门');
@@ -2118,11 +2134,25 @@ class UsersController extends AbstractController
             if (empty($parentDepartment)) {
                 return Base::retError('上级部门不存在或已被删除');
             }
+            if (FeishuOrgDepartmentMapping::whereDootaskDepartmentId($parent_id)->exists()) {
+                return Base::retError('该部门由飞书组织同步管理');
+            }
+            if ($id > 0) {
+                $cursor = $parentDepartment;
+                $visited = [];
+                while ($cursor) {
+                    if ($cursor->id === $id) {
+                        return Base::retError('不能选择自己的子部门作为上级部门');
+                    }
+                    if (isset($visited[$cursor->id])) {
+                        return Base::retError('部门层级关系异常');
+                    }
+                    $visited[$cursor->id] = true;
+                    $cursor = $cursor->parent_id ? UserDepartment::find($cursor->parent_id) : null;
+                }
+            }
             if (count($parentDepartment->parents()) > 2) {
                 return Base::retError('部门层级最多只能创建3级');
-            }
-            if ($id > 0 && UserDepartment::whereParentId($id)->whereId($parent_id)->exists()) {
-                return Base::retError('不能选择自己的子部门作为上级部门');
             }
             if (UserDepartment::whereParentId($parent_id)->count() >= 20) {
                 return Base::retError('每个部门最多只能创建20个子部门');
@@ -2169,6 +2199,9 @@ class UsersController extends AbstractController
         if (empty($userDepartment)) {
             return Base::retError('部门不存在或已被删除');
         }
+        if (FeishuOrgDepartmentMapping::whereDootaskDepartmentId($id)->exists()) {
+            return Base::retError('该部门由飞书组织同步管理');
+        }
         if (UserDepartment::whereParentId($id)->exists()) {
             return Base::retError('含有子部门无法删除');
         }
@@ -2201,6 +2234,9 @@ class UsersController extends AbstractController
         $userDepartment = UserDepartment::find($id);
         if (empty($userDepartment)) {
             return Base::retError('部门不存在或已被删除');
+        }
+        if (FeishuOrgDepartmentMapping::whereDootaskDepartmentId($id)->exists()) {
+            return Base::retError('该部门由飞书组织同步管理');
         }
 
         // 获取所有子部门（递归）
