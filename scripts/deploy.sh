@@ -113,7 +113,7 @@ find_nginx_containers() {
 }
 
 find_php_container() {
-  docker ps --format '{{.Names}}' | grep -E '^dootask-php-' | head -1
+  docker ps --format '{{.Names}}' | grep -E '^dootask-php-' | head -1 || true
 }
 
 # 检测单个 bind-mount 文件的 inode 一致性
@@ -162,7 +162,7 @@ restart_and_wait() {
 ensure_mount_inode_consistent() {
   local nginx_container redis_container php_container
   nginx_container=$(find_nginx_containers | head -1)
-  redis_container=$(docker ps --format '{{.Names}}' | grep -E '^dootask-redis-' | head -1)
+  redis_container=$(docker ps --format '{{.Names}}' | grep -E '^dootask-redis-' | head -1 || true)
   php_container=$(find_php_container)
 
   # 清单: container_var:host_path:container_path
@@ -352,6 +352,24 @@ if [ "$BEFORE" = "$AFTER" ]; then
 fi
 log "$BEFORE → $AFTER"
 
+# ───── Migration 预检（必须早于 tag / reset --hard）─────
+# INCIDENT 2026-09-21: cron 调用本脚本, 代码已 reset --hard 落盘后才走到下面的交互 read;
+# cron 无 tty, read 读到 EOF 返回非 0, set -e 当场杀掉脚本 →
+# "磁盘新代码 + migration 未跑 + PHP 未重启" 的半部署, SHA 看着是对的, 服务是旧的.
+# 两条修复: (1) 检测提前到动手之前; (2) 没有交互终端就拒绝, 而不是走到一半才卡住.
+# pathspec 让 git 自己过滤, 不用 `| grep -q` —— grep 命中先退出会让 git 吃 SIGPIPE,
+# pipefail 下整条管道退出码 141, if 判为假, 守卫静默失效（cron 侧同款 bug 一并修）。
+MIGRATION_FILES=$(git diff --name-only "$BEFORE" "$AFTER" -- database/migrations)
+if [ -n "$MIGRATION_FILES" ] && [ ! -t 0 ]; then
+  log "✗ 检测到 migration 变更, 但当前无交互终端（cron / 非 tty）:"
+  echo "$MIGRATION_FILES" | sed 's/^/    /'
+  log "  本次不部署, 磁盘代码保持不动. 请人工按序执行:"
+  log "    sudo /opt/dootask/scripts/migrate.sh --dry-run"
+  log "    sudo /opt/dootask/scripts/migrate.sh"
+  log "    sudo /opt/dootask/scripts/deploy.sh"
+  die "migration 部署需要人工终端"
+fi
+
 if [ $DRY_RUN -eq 1 ]; then
   echo
   log "[DRY-RUN] 将执行:"
@@ -361,9 +379,14 @@ if [ $DRY_RUN -eq 1 ]; then
   log "  5. 冒烟测试 (API 200 + HTML JS hash + 容器 healthy)"
   echo
   log "变更清单:"
-  git log --oneline "$BEFORE..$AFTER" | head -20
+  git log --oneline -20 "$BEFORE..$AFTER"
   echo
-  log "⚠️  如包含 migration, 先单独跑 ./scripts/migrate.sh, 再跑本脚本（不带 --dry-run）"
+  if [ -n "$MIGRATION_FILES" ]; then
+    log "⚠️  本次包含 migration, 必须先人工跑 ./scripts/migrate.sh, 再跑本脚本（不带 --dry-run）:"
+    echo "$MIGRATION_FILES" | sed 's/^/    /'
+  else
+    log "本次无 migration 变更"
+  fi
   exit 0
 fi
 
@@ -376,11 +399,11 @@ prune_old_tags
 log "=== 3/5 同步代码 ==="
 git reset --hard "$AFTER"
 
-# Migration 提醒（不代执行）
-if git diff --name-only "$BEFORE" "$AFTER" | grep -qE '^database/migrations/'; then
+# Migration 提醒（不代执行）。无 tty 的情况已在预检里挡掉, 走到这里必然是交互终端。
+if [ -n "$MIGRATION_FILES" ]; then
   echo
   log "⚠️  检测到 migration 变更:"
-  git diff --name-only "$BEFORE" "$AFTER" | grep -E '^database/migrations/' | sed 's/^/    /'
+  echo "$MIGRATION_FILES" | sed 's/^/    /'
   echo
   log "⚠️  本脚本不跑 migration. 请另开终端执行:"
   log "    sudo ./scripts/migrate.sh --dry-run   # 预演"
