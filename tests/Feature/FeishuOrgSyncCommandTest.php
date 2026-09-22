@@ -128,9 +128,11 @@ class FeishuOrgSyncCommandTest extends TestCase
                 ]],
                 ['userId' => 62, 'before' => [2, 17], 'preserve' => [17], 'managed' => [
                     ['sourceId' => 'od-child', 'reason' => 'direct'],
+                    ['sourceId' => 'od-046de9ebfea10edd226515e26afa12e0', 'reason' => 'ancestor'],
                 ]],
                 ['userId' => 81, 'before' => [2, 17], 'preserve' => [17], 'managed' => [
                     ['sourceId' => 'od-child', 'reason' => 'owner_required'],
+                    ['sourceId' => 'od-046de9ebfea10edd226515e26afa12e0', 'reason' => 'ancestor'],
                 ]],
             ],
             'findings' => [

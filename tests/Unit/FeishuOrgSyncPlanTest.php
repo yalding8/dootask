@@ -158,6 +158,63 @@ class FeishuOrgSyncPlanTest extends TestCase
         $this->parse($plan);
     }
 
+    public function test_accepts_ancestor_membership_for_every_real_ancestor_of_a_managed_department(): void
+    {
+        $plan = $this->validPlan();
+        $plan['departments'][] = $this->department('od-child', $plan['sourceRoot'], 3);
+        $plan['departments'][] = $this->department('od-leaf', 'od-child', 4);
+        $plan['members'][] = ['userId' => 62, 'before' => [2], 'preserve' => [], 'managed' => [
+            ['sourceId' => 'od-leaf', 'reason' => 'direct'],
+            ['sourceId' => 'od-child', 'reason' => 'ancestor'],
+            ['sourceId' => $plan['sourceRoot'], 'reason' => 'ancestor'],
+        ]];
+        $plan['members'][] = ['userId' => 81, 'before' => [2], 'preserve' => [], 'managed' => [
+            ['sourceId' => 'od-child', 'reason' => 'owner_required'],
+            ['sourceId' => $plan['sourceRoot'], 'reason' => 'ancestor'],
+        ]];
+
+        $this->assertCount(2, $this->parse($plan)->members());
+    }
+
+    /**
+     * @dataProvider invalidAncestorMemberships
+     */
+    public function test_rejects_ancestor_membership_that_is_not_a_real_ancestor(array $managed): void
+    {
+        $plan = $this->validPlan();
+        $plan['departments'][] = $this->department('od-child', $plan['sourceRoot'], 3);
+        $plan['departments'][] = $this->department('od-sibling', $plan['sourceRoot'], 4);
+        $plan['members'][] = ['userId' => 62, 'before' => [2], 'preserve' => [], 'managed' => $managed];
+
+        $this->expectExceptionMessage('组织计划成员归属无效');
+        $this->parse($plan);
+    }
+
+    public function invalidAncestorMemberships(): array
+    {
+        $root = 'od-046de9ebfea10edd226515e26afa12e0';
+        return [
+            'descendant tagged as ancestor' => [[
+                ['sourceId' => $root, 'reason' => 'direct'],
+                ['sourceId' => 'od-child', 'reason' => 'ancestor'],
+            ]],
+            'sibling tagged as ancestor' => [[
+                ['sourceId' => 'od-child', 'reason' => 'direct'],
+                ['sourceId' => 'od-sibling', 'reason' => 'ancestor'],
+            ]],
+            'ancestor without any direct or owner department' => [[
+                ['sourceId' => $root, 'reason' => 'ancestor'],
+            ]],
+            'the same department listed twice' => [[
+                ['sourceId' => 'od-child', 'reason' => 'direct'],
+                ['sourceId' => 'od-child', 'reason' => 'ancestor'],
+            ]],
+            'unknown reason' => [[
+                ['sourceId' => 'od-child', 'reason' => 'parent'],
+            ]],
+        ];
+    }
+
     private function parse(array $plan): OrgSyncPlan
     {
         unset($plan['digest']);
