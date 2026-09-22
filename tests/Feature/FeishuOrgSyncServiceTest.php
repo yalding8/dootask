@@ -270,6 +270,72 @@ class FeishuOrgSyncServiceTest extends TestCase
         $this->assertSame($beforeRestore, $this->writeCounts());
     }
 
+    public function test_dry_run_counters_match_the_counters_of_the_apply_that_follows(): void
+    {
+        $this->seedOrganization();
+        $service = new OrgSyncService();
+
+        $preview = $service->preview($this->plan());
+        $applied = $service->apply($this->plan(), $this->plan()->digest())->countersArray();
+
+        // The dry-run counters are one of the two apply gates (the digest is the other), which only
+        // holds while both sides count the same thing. They did not: apply counted affected rows for
+        // departments (updated_at always differs) and ignored metadata-only group changes, so batch 1
+        // on 2026-09-22 reported 4/11 planned against 7/10 applied.
+        ksort($preview);
+        ksort($applied);
+        $this->assertSame($preview, $applied);
+        $this->assertSame(0, $applied['updatedDepartments']);
+    }
+
+    public function test_preview_accepts_a_retained_department_outside_the_old_hard_coded_pair(): void
+    {
+        $this->seedOrganization();
+
+        $preview = (new OrgSyncService())->preview($this->planWithFindings([
+            ['code' => 'LEGACY_RETAINED', 'targetId' => 9],
+        ]));
+
+        $this->assertSame(1, $preview['legacyRetained']);
+    }
+
+    public function test_apply_rejects_a_retained_finding_that_the_plan_itself_maps(): void
+    {
+        $this->seedOrganization();
+        $before = $this->writeCounts();
+        $plan = $this->planWithFindings([['code' => 'LEGACY_RETAINED', 'targetId' => 2]]);
+
+        try {
+            (new OrgSyncService())->apply($plan, $plan->digest());
+            $this->fail('Expected retained finding validation failure.');
+        } catch (ApiException $e) {
+            $this->assertSame('组织计划保留项无效', $e->getMessage());
+        }
+
+        $this->assertSame($before, $this->writeCounts());
+        $this->assertSame(0, DB::table('feishu_org_sync_batches')->count());
+    }
+
+    public function test_apply_rejects_a_retained_finding_for_a_department_that_no_longer_exists(): void
+    {
+        $this->seedOrganization();
+        // The very drift this guard exists for: 17/18 were retired by hand on 2026-09-22 while the
+        // mapping still claimed to retain them.
+        DB::table('user_departments')->where('id', 17)->delete();
+        $before = $this->writeCounts();
+        $plan = $this->plan();
+
+        try {
+            (new OrgSyncService())->apply($plan, $plan->digest());
+            $this->fail('Expected retained finding validation failure.');
+        } catch (ApiException $e) {
+            $this->assertSame('组织计划保留项无效', $e->getMessage());
+        }
+
+        $this->assertSame($before, $this->writeCounts());
+        $this->assertSame(0, DB::table('feishu_org_sync_batches')->count());
+    }
+
     private function seedOrganization(): void
     {
         DB::table('web_socket_dialogs')->insert([
@@ -300,7 +366,28 @@ class FeishuOrgSyncServiceTest extends TestCase
 
     private function plan(): OrgSyncPlan
     {
-        $data = [
+        return $this->planFrom($this->planData());
+    }
+
+    private function planWithFindings(array $findings): OrgSyncPlan
+    {
+        $data = $this->planData();
+        $data['findings'] = $findings;
+        return $this->planFrom($data);
+    }
+
+    private function planFrom(array $data): OrgSyncPlan
+    {
+        $data['digest'] = hash('sha256', $this->canonicalJson($data));
+        return OrgSyncPlan::fromJson(
+            json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            new DateTimeImmutable('2026-09-21T06:05:00Z')
+        );
+    }
+
+    private function planData(): array
+    {
+        return [
             'schemaVersion' => 1,
             'generatedAt' => '2026-09-21T06:00:00.000Z',
             'expiresAt' => '2026-09-21T06:15:00.000Z',
@@ -336,11 +423,6 @@ class FeishuOrgSyncServiceTest extends TestCase
                 ['code' => 'LEGACY_RETAINED', 'targetId' => 18],
             ],
         ];
-        $data['digest'] = hash('sha256', $this->canonicalJson($data));
-        return OrgSyncPlan::fromJson(
-            json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            new DateTimeImmutable('2026-09-21T06:05:00Z')
-        );
     }
 
     private function canonicalJson($value): string

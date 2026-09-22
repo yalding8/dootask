@@ -156,11 +156,17 @@ final class OrgSyncPlan
     private static function validateFindings($findings): void
     {
         if (!is_array($findings)) throw new ApiException('组织计划保留项无效');
+        // The retained ids used to be hard-coded as [17, 18]; both were retired on 2026-09-22, which
+        // left the whitelist asserting nothing and blocking any future retention. Shape is checked
+        // here, reality (the department exists and this plan does not touch it) in verifyPreconditions().
+        $seen = [];
         foreach ($findings as $finding) {
             self::requireKeys($finding, ['code', 'targetId']);
-            if ($finding['code'] !== 'LEGACY_RETAINED' || !in_array($finding['targetId'], [17, 18], true)) {
+            if ($finding['code'] !== 'LEGACY_RETAINED' || !is_int($finding['targetId']) || $finding['targetId'] <= 0
+                || in_array($finding['targetId'], $seen, true)) {
                 throw new ApiException('组织计划保留项无效');
             }
+            $seen[] = $finding['targetId'];
         }
     }
 

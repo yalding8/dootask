@@ -215,6 +215,41 @@ class FeishuOrgSyncPlanTest extends TestCase
         ];
     }
 
+    public function test_accepts_any_real_department_id_as_a_retained_finding(): void
+    {
+        $plan = $this->validPlan();
+        // 17/18 used to be hard-coded here; both were retired on 2026-09-22. Whether the id is a real,
+        // untouched department is a database question, answered in OrgSyncService::verifyPreconditions().
+        $plan['findings'] = [['code' => 'LEGACY_RETAINED', 'targetId' => 9]];
+
+        $this->assertSame([['code' => 'LEGACY_RETAINED', 'targetId' => 9]], $this->parse($plan)->findings());
+    }
+
+    /**
+     * @dataProvider invalidFindings
+     */
+    public function test_rejects_malformed_retained_findings(array $findings): void
+    {
+        $plan = $this->validPlan();
+        $plan['findings'] = $findings;
+
+        $this->expectExceptionMessage('组织计划保留项无效');
+        $this->parse($plan);
+    }
+
+    public function invalidFindings(): array
+    {
+        return [
+            'unknown code' => [[['code' => 'LEGACY_DROPPED', 'targetId' => 9]]],
+            'non-integer id' => [[['code' => 'LEGACY_RETAINED', 'targetId' => '9']]],
+            'non-positive id' => [[['code' => 'LEGACY_RETAINED', 'targetId' => 0]]],
+            'duplicate id' => [[
+                ['code' => 'LEGACY_RETAINED', 'targetId' => 9],
+                ['code' => 'LEGACY_RETAINED', 'targetId' => 9],
+            ]],
+        ];
+    }
+
     private function parse(array $plan): OrgSyncPlan
     {
         unset($plan['digest']);
