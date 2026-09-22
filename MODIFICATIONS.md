@@ -10,6 +10,11 @@ This is a modified version of [DooTask](https://github.com/kuaifan/dootask), lic
 
 ## Changes
 
+### `app/Module/FeishuOrgSync/OrgSyncService.php`, `OrgSyncPlan.php` (2026-09-22, follow-up to #7/#8)
+
+1. **Made the dry-run counters comparable to the applied ones.** `preview()` counted semantic changes while `applyDepartments()` counted affected rows — and `updated_at` always differs, so every update-action department was reported as changed; `applyGroups()` counted membership changes only and applied metadata-only changes silently. Batch 1 (2026-09-22) therefore planned 4 department and 11 group updates but reported 7 and 10. Both sides now share `departmentChanges()` / `groupChanges()`, so the dry-run counters are a real apply gate next to the digest.
+2. **Replaced the hard-coded `LEGACY_RETAINED` whitelist `[17, 18]`.** Both departments were retired by hand on 2026-09-22, leaving the whitelist asserting nothing while blocking any future retention. The plan now checks shape only (positive integer, no duplicates); `verifyPreconditions()` checks reality — a retained department must still exist and must not be one the plan maps — so a stale `legacyRetained` in the mapping file fails closed instead of inflating a counter.
+
 ### `app/Module/FeishuOrgSync/OrgSyncPlan.php` (2026-09-22, follow-up to #7)
 
 1. **Accepted a third membership reason `ancestor`** in plan members, next to `direct` and `owner_required`. DooTask department groups hold only direct members, so a leaf-department member synced with `direct` alone silently left every parent department group (a first production dry-run on 2026-09-22 would have shrunk 金融推广部群 from 34 to 2 members). The bridge plan generator now lists every target-tree ancestor explicitly; the validator fails closed unless each `ancestor` entry is a real ancestor of one of that member's `direct`/`owner_required` departments, and rejects a department listed twice for one member. Apply/restore logic is unchanged: it already iterates `managed`.

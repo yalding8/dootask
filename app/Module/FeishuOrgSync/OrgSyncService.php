@@ -36,14 +36,14 @@ final class OrgSyncService
                     $parent = $department['parentSourceId'] === null
                         ? $department['before']['parent']
                         : $resolved[$department['parentSourceId']];
-                    if ($parent === null || $department['before']['parent'] !== $parent
-                        || $department['before']['name'] !== $department['name']
-                        || $department['before']['owner'] !== $department['ownerUserId']) {
+                    if ($this->departmentChanges($department, $parent)) {
                         $counters['updatedDepartments']++;
                     }
                 }
                 $desired = $this->desiredGroupUsers($plan, $department);
                 if ($department['action'] === 'create') {
+                    // createGroup() seeds the dialog with correct metadata and the owner alone, so
+                    // this is groupChanges() evaluated against that freshly created group.
                     if ($desired !== [$department['ownerUserId']]) {
                         $counters['updatedGroups']++;
                     }
@@ -52,11 +52,7 @@ final class OrgSyncService
                 $dialog = DB::table('web_socket_dialogs')->where('id', $department['before']['dialog'])->first();
                 $existing = DB::table('web_socket_dialog_users')->where('dialog_id', $department['before']['dialog'])
                     ->pluck('userid')->map(fn ($id) => (int) $id)->all();
-                $proposed = $this->sortedIds(array_merge(array_diff($existing, $plannedUsers), $desired));
-                if (!$dialog || (string) $dialog->name !== $department['name']
-                    || (int) $dialog->owner_id !== $department['ownerUserId']
-                    || (string) $dialog->group_type !== 'department'
-                    || $this->sortedIds($existing) !== $proposed) {
+                if ($this->groupChanges($department, $dialog, $existing, $desired, $plannedUsers)) {
                     $counters['updatedGroups']++;
                 }
             }
@@ -242,6 +238,16 @@ final class OrgSyncService
                 throw new ApiException('组织目标状态已变化');
             }
         }
+        // A LEGACY_RETAINED finding claims a department survives this plan untouched. Assert it:
+        // it must still exist and must not be one of the departments the plan maps.
+        $mapped = array_map('intval', array_filter(array_column($plan->departments(), 'targetId')));
+        foreach ($plan->findings() as $finding) {
+            $targetId = (int) $finding['targetId'];
+            if (in_array($targetId, $mapped, true)
+                || !DB::table('user_departments')->where('id', $targetId)->exists()) {
+                throw new ApiException('组织计划保留项无效');
+            }
+        }
         return $resolved;
     }
 
@@ -267,7 +273,11 @@ final class OrgSyncService
                 $this->checkpoint('after_department');
             } else {
                 $id = $resolved[$department['sourceId']];
-                $changed = DB::table('user_departments')->where('id', $id)->update([
+                // Count the semantic change, not affected rows: updated_at always differs, so the
+                // affected-row count reported every update-action department and made the dry-run
+                // counter incomparable to the applied one (2026-09-22 batch 1: 4 planned vs 7 applied).
+                $changed = $this->departmentChanges($department, $parentId);
+                DB::table('user_departments')->where('id', $id)->update([
                     'name' => $department['name'], 'parent_id' => $parentId,
                     'owner_userid' => $department['ownerUserId'], 'updated_at' => now(),
                 ]);
@@ -311,13 +321,17 @@ final class OrgSyncService
             $departmentId = $resolved[$department['sourceId']];
             $row = DB::table('user_departments')->where('id', $departmentId)->first();
             $dialogId = (int) $row->dialog_id;
+            $dialog = DB::table('web_socket_dialogs')->where('id', $dialogId)->first();
+            $desired = $this->desiredGroupUsers($plan, $department);
+            $existing = DB::table('web_socket_dialog_users')->where('dialog_id', $dialogId)
+                ->pluck('userid')->map(fn ($id) => (int) $id)->all();
+            // Evaluated before the write, with the same predicate preview() uses: a metadata-only
+            // change used to be applied silently without being counted (batch 1: 11 planned vs 10 applied).
+            $changed = $this->groupChanges($department, $dialog, $existing, $desired, $plannedUsers);
             DB::table('web_socket_dialogs')->where('id', $dialogId)->update([
                 'name' => $department['name'], 'owner_id' => $department['ownerUserId'],
                 'group_type' => 'department', 'updated_at' => now(),
             ]);
-            $desired = $this->desiredGroupUsers($plan, $department);
-            $existing = DB::table('web_socket_dialog_users')->where('dialog_id', $dialogId)
-                ->pluck('userid')->map(fn ($id) => (int) $id)->all();
             $remove = array_values(array_intersect(array_diff($existing, $desired), $plannedUsers));
             if ($remove) {
                 DB::table('web_socket_dialog_users')->where('dialog_id', $dialogId)->whereIn('userid', $remove)->delete();
@@ -330,7 +344,7 @@ final class OrgSyncService
             }
             DB::table('web_socket_dialog_users')->where('dialog_id', $dialogId)->whereIn('userid', $desired)
                 ->update(['important' => 1, 'updated_at' => now()]);
-            if ($remove || array_diff($desired, $existing)) {
+            if ($changed) {
                 $counters['updatedGroups']++;
                 $this->checkpoint('after_group');
             }
@@ -500,6 +514,33 @@ final class OrgSyncService
                 Cache::forget('department_info_' . (int) $department['id']);
             }
         }
+    }
+
+    /**
+     * Semantic department change, shared by preview() and applyDepartments() so a dry-run counter
+     * is a real gate for apply. A null parent means the parent is itself being created by this
+     * plan, which always moves the child.
+     */
+    private function departmentChanges(array $department, $parentId): bool
+    {
+        return $parentId === null
+            || (int) $department['before']['parent'] !== (int) $parentId
+            || (string) $department['before']['name'] !== (string) $department['name']
+            || (int) $department['before']['owner'] !== (int) $department['ownerUserId'];
+    }
+
+    /**
+     * Semantic department-group change (metadata or membership), shared by preview() and
+     * applyGroups(). Only planned users may be removed, so unmanaged members never count.
+     */
+    private function groupChanges(array $department, $dialog, array $existing, array $desired, array $plannedUsers): bool
+    {
+        $proposed = $this->sortedIds(array_merge(array_diff($existing, $plannedUsers), $desired));
+        return !$dialog
+            || (string) $dialog->name !== (string) $department['name']
+            || (int) $dialog->owner_id !== (int) $department['ownerUserId']
+            || (string) $dialog->group_type !== 'department'
+            || $this->sortedIds($existing) !== $proposed;
     }
 
     private function parseDepartments($raw): array
