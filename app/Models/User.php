@@ -137,7 +137,11 @@ class User extends AbstractModel
         if (empty($value)) {
             return [];
         }
-        return array_filter(is_array($value) ? $value : explode(",", trim($value, ",")));
+        // '[]' is a legacy fallback default (Doo::userCreate), not a real identity;
+        // keeping it would re-serialize into ',[],...' and hit chk_identity_no_corruption
+        return array_filter(is_array($value) ? $value : explode(",", trim($value, ",")), function ($item) {
+            return $item !== '' && $item !== '[]';
+        });
     }
 
     /**
