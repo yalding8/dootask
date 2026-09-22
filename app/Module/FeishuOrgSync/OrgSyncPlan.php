@@ -119,6 +119,7 @@ final class OrgSyncPlan
     {
         if (!is_array($members)) throw new ApiException('组织计划成员无效');
         $sourceIds = array_fill_keys(array_column($departments, 'sourceId'), true); $users = [];
+        $parentOf = array_column($departments, 'parentSourceId', 'sourceId');
         foreach ($members as $member) {
             self::requireKeys($member, ['userId', 'before', 'preserve', 'managed']);
             if (!is_int($member['userId']) || $member['userId'] <= 0 || isset($users[$member['userId']])
@@ -127,11 +128,27 @@ final class OrgSyncPlan
             }
             $users[$member['userId']] = true;
             if (count($member['preserve']) + count($member['managed']) > 10) throw new ApiException('组织计划成员部门超限');
+            $explicit = []; $ancestors = []; $seen = [];
             foreach ($member['managed'] as $managed) {
                 self::requireKeys($managed, ['sourceId', 'reason']);
-                if (!isset($sourceIds[$managed['sourceId']]) || !in_array($managed['reason'], ['direct', 'owner_required'], true)) {
+                if (!isset($sourceIds[$managed['sourceId']]) || isset($seen[$managed['sourceId']])
+                    || !in_array($managed['reason'], ['direct', 'owner_required', 'ancestor'], true)) {
                     throw new ApiException('组织计划成员归属无效');
                 }
+                $seen[$managed['sourceId']] = true;
+                if ($managed['reason'] === 'ancestor') $ancestors[] = $managed['sourceId'];
+                else $explicit[] = $managed['sourceId'];
+            }
+            // 'ancestor' entries keep parent department groups populated (DooTask groups hold direct members only).
+            // Each one must be a real ancestor of a direct/owner_required department of the same member.
+            foreach ($ancestors as $ancestor) {
+                $justified = false;
+                foreach ($explicit as $sourceId) {
+                    for ($cursor = $parentOf[$sourceId]; $cursor !== null; $cursor = $parentOf[$cursor]) {
+                        if ($cursor === $ancestor) { $justified = true; break 2; }
+                    }
+                }
+                if (!$justified) throw new ApiException('组织计划成员归属无效');
             }
         }
     }

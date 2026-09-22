@@ -34,6 +34,8 @@ class FeishuOrgSyncServiceTest extends TestCase
     {
         $this->seedOrganization();
         Cache::forever('UserDepartment::rand', 'before-sync');
+        // Relative count: the sync must add no message anywhere, on an empty CI database or a populated dev one.
+        $messagesBefore = DB::table('web_socket_dialog_msgs')->count();
 
         $batch = (new OrgSyncService())->apply($this->plan(), $this->plan()->digest());
 
@@ -45,15 +47,16 @@ class FeishuOrgSyncServiceTest extends TestCase
             'id' => $createdId, 'parent_id' => 2, 'name' => '天津缴费组', 'owner_userid' => 81,
         ]);
         $this->assertSame([2, 9], $this->departmentsFor(48));
-        $this->assertSame([17, $createdId], $this->departmentsFor(81));
-        $this->assertSame([17, $createdId], $this->departmentsFor(62));
+        // Ancestor membership keeps child-department members inside the parent department and its group.
+        $this->assertSame([2, 17, $createdId], $this->departmentsFor(81));
+        $this->assertSame([2, 17, $createdId], $this->departmentsFor(62));
         $this->assertSame([18], $this->departmentsFor(100));
 
         $rootDialog = DB::table('user_departments')->where('id', 2)->value('dialog_id');
         $childDialog = DB::table('user_departments')->where('id', $createdId)->value('dialog_id');
-        $this->assertSame([48, 99], $this->dialogUsers((int) $rootDialog));
+        $this->assertSame([48, 62, 81, 99], $this->dialogUsers((int) $rootDialog));
         $this->assertSame([62, 81], $this->dialogUsers((int) $childDialog));
-        $this->assertSame(0, DB::table('web_socket_dialog_msgs')->count());
+        $this->assertSame($messagesBefore, DB::table('web_socket_dialog_msgs')->count());
         $this->assertNotSame('before-sync', Cache::get('UserDepartment::rand'));
 
         $this->assertSame(FeishuOrgSyncBatch::STATUS_APPLIED, $batch->status);
@@ -321,9 +324,11 @@ class FeishuOrgSyncServiceTest extends TestCase
                 ]],
                 ['userId' => 62, 'before' => [2, 17], 'preserve' => [17], 'managed' => [
                     ['sourceId' => 'od-child', 'reason' => 'direct'],
+                    ['sourceId' => 'od-046de9ebfea10edd226515e26afa12e0', 'reason' => 'ancestor'],
                 ]],
                 ['userId' => 81, 'before' => [2, 17], 'preserve' => [17], 'managed' => [
                     ['sourceId' => 'od-child', 'reason' => 'owner_required'],
+                    ['sourceId' => 'od-046de9ebfea10edd226515e26afa12e0', 'reason' => 'ancestor'],
                 ]],
             ],
             'findings' => [

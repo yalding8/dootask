@@ -10,6 +10,14 @@ This is a modified version of [DooTask](https://github.com/kuaifan/dootask), lic
 
 ## Changes
 
+### `app/Module/FeishuOrgSync/OrgSyncPlan.php` (2026-09-22, follow-up to #7)
+
+1. **Accepted a third membership reason `ancestor`** in plan members, next to `direct` and `owner_required`. DooTask department groups hold only direct members, so a leaf-department member synced with `direct` alone silently left every parent department group (a first production dry-run on 2026-09-22 would have shrunk 金融推广部群 from 34 to 2 members). The bridge plan generator now lists every target-tree ancestor explicitly; the validator fails closed unless each `ancestor` entry is a real ancestor of one of that member's `direct`/`owner_required` departments, and rejects a department listed twice for one member. Apply/restore logic is unchanged: it already iterates `managed`.
+
+### `app/Module/FeishuOrgSync/*`, `app/Console/Commands/FeishuOrgSync*.php`, `app/Models/FeishuOrg*.php`, `database/migrations/2026_09_21_000000_create_feishu_org_sync_tables.php` (added 2026-09-21, PR #7)
+
+Controlled Feishu organization writes: plan validation (SHA-256 digest, 15-minute TTL, fixed roots, five-level tree), transactional silent apply/restore with snapshots, managed-node protection in `UsersController`/`TeamManagement.vue`, ancestor-cycle guard in `UserDepartment`. Full record: `uhomes-workorder/docs/DOOTASK_MODIFICATIONS.md` and `docs/DESIGN_2026-09-21_ORG_WRITE.md` in that repository.
+
 ### `app/Module/Doo.php`
 
 1. **`license()` method**: Modified to return `people = 0` (unlimited users), bypassing the compiled binary's user count restriction for internal deployment.
